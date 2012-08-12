@@ -2,8 +2,8 @@
 require 'xmmsclient'
 require 'readline'
 
-$xc = Xmms::Client.new("rpncol")
-$xc.connect() or exit "*sign*...fuck it"
+$xc = Xmms::Client.new("xmms2-col")
+$xc.connect() or exit "*sigh* I can't connect"
 
 class Collection < Xmms::Collection
     def initialize (type)
@@ -244,7 +244,9 @@ def build_collection (input)
             when :c_print_coll
                 vstack.last.is_a?(Collection) and vstack.last.print_coll
             when :c_print_stack
-                puts "HEAD", vstack.reverse, "----"
+                vstack.reverse.each_with_index do |item,i|
+                    puts "%3d. %-s" % [i, item]
+                end
             else
                 vstack << t
             end

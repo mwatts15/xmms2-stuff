@@ -1,0 +1,821 @@
+#!/usr/bin/env ruby
+require 'xmmsclient'
+require 'socket'
+#-----------------------------------#
+# xce - xmms2 collections editor    #
+# An xmms2 collection editor/viewer #
+# tool based on reverse-polish      #
+# notation calculators              #
+#       (c) Mark W. 2012            #
+#-----------------------------------#
+# Set this to true if you wan't
+# functions to be curried rather
+# than just raising NotEnoughArguments
+$DO_CURRYING = false
+$SOCKET_PATH = "/tmp/#{ENV["USER"]}-xce-ipc-socket"
+
+$FILE_LOCK = "#{Xmms::userconfdir}/xce.lock"
+    if not File.new($FILE_LOCK, "w").flock( File::LOCK_NB | File::LOCK_EX )
+        print $SOCKET_PATH
+        exit(-1)
+    end
+
+$xc = Xmms::Client.new("xmms2-collections-editor") #or exit
+begin
+    $xc.connect()
+rescue Xmms::Client::ClientError => e
+    $stderr.puts "Couldn't connect to daemon, trying to start it"
+    `xmms2-launcher`
+    ntries = 1
+    while $? != 0
+        if ntries > 4
+            exit "Can't start xmms2d. Exiting."
+        end
+        $stderr.puts "Coludn't start the daemon, trying again..."
+        sleep 3
+        `xmms2-launcher -vvvv`
+        ntries += 1
+    end
+    $stderr.puts "Connected."
+end
+
+$empty_sym = [:empty, ['~']]
+
+$classes = [:op, :quant]
+
+$fn_syms = { 
+    :op =>
+    [[:op_and, %w(a and), Xmms::Collection::TYPE_INTERSECTION],
+        [:op_or, %w(o or), Xmms::Collection::TYPE_UNION], 
+        [:op_andn, %w(an andn), Xmms::Collection::TYPE_INTERSECTION],
+        [:op_orn, %w(on orn), Xmms::Collection::TYPE_UNION],
+        [:op_not, %w(n not), Xmms::Collection::TYPE_COMPLEMENT]],
+    :quant => 
+    [[:q_gt, %w(> gt), Xmms::Collection::TYPE_GREATER],
+        [:q_lt, %w(< lt), Xmms::Collection::TYPE_SMALLER],
+        [:q_ge, %w(>= ge), Xmms::Collection::TYPE_GREATEREQ],
+        [:q_has, %w(has), Xmms::Collection::TYPE_HAS],
+        [:q_le, %w(<= le), Xmms::Collection::TYPE_SMALLEREQ],
+        [:q_match, %w(m match), Xmms::Collection::TYPE_MATCH],
+        [:q_eq, %w(= eq), Xmms::Collection::TYPE_EQUALS]],
+    :field =>
+    [[:f_artist, %w(ar artist), "artist"],
+        [:f_album, %w(al album), "album"],
+        [:f_title, %w(ti title), "title"],
+        [:f_bitrate, %w(br bitrate), "bitrate"],
+        [:f_timesplayed, %w(played timesplayed), "timesplayed"],
+        [:f_url, %w(url uri), "url"],
+        [:f_genre, %w(gen genre), "genre"],
+        [:f_date, %w(dt yr date year), "date"]],
+    :cmd =>
+    [[:c_clear_stack, %w(cl)],
+        [:c_pop, %w(pop)],
+        [:c_swap, %w(swap)],
+        [:c_reverse, %w(rev)],
+        [:c_rotate, %w(rot dig)],
+        [:c_dup, %w(dup)],
+        [:c_add_to_playlist, %w(addp)],
+        [:c_print_head, %w(p)],
+        [:c_print_stack, %w(ps)],
+        [:c_save_coll, %w(save)],
+        [:c_save_playlist, %w(savep)],
+        [:c_reload, %w(rl)],
+        [:c_print_coll, %w(pc)]],
+    :math =>
+    [[:m_plus, %w(+), :+],
+        [:m_minus, %w(-), :-],
+        [:m_mult, %w(*), :*],
+        [:m_div, %w(/), :/]],
+    :comb =>
+    [[:co_cons, %w(cons .)],
+        [:co_car, %w(car)],
+        [:co_list, %w(list ])],
+        [:co_draw, %w(draw)]]
+}
+
+# returns the token associated with
+# a given string
+$token_table =
+($fn_syms.values.reduce(:+) << $empty_sym).reduce(Hash.new) do |h, s|
+    token = s[0]
+    opers = s[1]
+    opers.each do |op|
+        h[op] = token
+    end
+    h
+end
+
+# These are the collection types for Xmms::Collection
+# but also the field names for field specs or any
+# other item that differentiates members in a class
+$coll_types =
+$fn_syms.values.reduce(Hash.new) do |h,s|
+    tokens = s.transpose[0]
+    types = s.transpose[2]
+    if types.nil? then types = [] end
+    tokens.zip(types).collect do |pair|
+        h[pair[0]] = pair[1]
+    end
+    h
+end
+
+$unary_symbolic_ops = %w{< > = !}
+
+$pats = Hash.new
+$pats[:str] = /.*/
+$pats[:int] = /\A(-|\+)?\d+\Z/
+
+
+class WrongType < Exception
+    def initialize(type, actor)
+        msg = "Wrong type (#{type}) for #{actor}"
+        super msg
+    end
+end
+class NotEnoughArguments < Exception
+    def initialize(function)
+        msg = "Not enough arguments to #{function}"
+        super msg
+    end
+end
+$type_names = {
+    1 => "Universe",
+    Xmms::Collection::TYPE_REFERENCE => "Reference",
+    Xmms::Collection::TYPE_UNION => "Union",
+    Xmms::Collection::TYPE_INTERSECTION => "Intersection",
+    Xmms::Collection::TYPE_COMPLEMENT => "Complement",
+    Xmms::Collection::TYPE_HAS => "Has",
+    Xmms::Collection::TYPE_MATCH => "Match",
+    Xmms::Collection::TYPE_TOKEN => "Token",
+    Xmms::Collection::TYPE_EQUALS => "Equals",
+    Xmms::Collection::TYPE_NOTEQUAL => "Notequal",
+    Xmms::Collection::TYPE_SMALLER => "Smaller",
+    Xmms::Collection::TYPE_SMALLEREQ => "Smallereq",
+    Xmms::Collection::TYPE_GREATER => "Greater",
+    Xmms::Collection::TYPE_GREATEREQ => "Greatereq",
+    Xmms::Collection::TYPE_ORDER => "Order",
+    Xmms::Collection::TYPE_LIMIT => "Limit",
+    Xmms::Collection::TYPE_MEDIASET => "Mediaset",
+    Xmms::Collection::TYPE_IDLIST => "Idlist"
+}
+
+module Function
+    # abstracts the notion of "things that take
+    # arguments and return values"
+    # We have this because collections don't
+    # take arguments in a uniform sort of way
+    # and because some things that take argments
+    # don't make collections
+    # other classes should subclass this one as
+    # an interface
+    class UnknownFunction < Exception
+        def initialize(token)
+            msg = "No function for token: #{token}"
+            $stderr.write(construct_tlv("err", msg))
+            super msg
+        end
+    end
+    def create(token)
+        # Creates a function basing it on the
+        # token given
+        case token
+        when *$fn_syms[:field].transpose[0]
+            FieldSpec.new($coll_types[token])
+        when *$fn_syms[:quant].transpose[0]
+            CmpCollection.new($coll_types[token])
+        when *$fn_syms[:op].transpose[0]
+            BoolCollection.new($coll_types[token])
+        when *$fn_syms[:math].transpose[0]
+            MathOperation.new($coll_types[token])
+        when :co_car
+            Car.new
+        when :co_cons
+            Cons.new
+        when :co_list
+            List.new
+        when :co_draw
+            Draw.new
+        when :c_clear_stack
+            ClearStack.new
+        when :c_pop
+            PopStack.new
+        when :c_dup
+            Duplicate.new
+        when :c_rotate
+            Rotate.new
+        when :c_reverse
+            Reverse.new
+        when :c_swap
+            Swap.new
+        when :c_add_to_playlist
+            AddToPlaylist.new
+        when :c_print_head
+            PrintHead.new
+        when :c_print_stack
+            PrintStack.new
+        when :c_print_coll
+            PrintColl.new
+        when :c_save_coll
+            SaveCollection.new
+        when :c_reload
+            Restart.new
+        when :c_save_playlist
+            SaveCollection.new(Xmms::Collection::NS_PLAYLISTS)
+        else
+            raise UnKnownFunction.new(token)
+        end
+    end
+
+    def push(o)
+        # push arguments into the function
+        #
+        # Implementations of push _should_ return
+        # the calling object
+        raise NotImplementedError.new("push")
+    end
+    def arity
+        # how many arguments the function takes
+        # -1 means "an arbitrary number"
+        -1
+    end
+    def return
+        # Gives the result values of the function
+        # in an array
+        #
+        # For many this will just be [self] but
+        # this is needed for things like commands
+        # which can return nothing, or which return
+        # other object types
+        raise NotImplementedError.new("return")
+    end
+    module_function :create
+end
+
+# Listables can take and return lists
+# they also get a special list variables for free
+module Listable
+    @list = nil
+end
+
+class FieldSpec
+    include Function
+    include Listable
+    # specifies a field and a value for that field
+    # becomes the argument for a quantifier type
+    # collection
+    def initialize(field)
+        @field = field
+        @value = nil
+        # This is returned if we received a list of 
+        # values as our argument
+    end
+    def push (value)
+        if value.is_a?(Array)
+            @list = value.collect{|val| FieldSpec.new(@field).push(val)}
+        else
+            @value = value
+        end
+        self
+    end
+    def arity
+        1
+    end
+    def return
+        if @list.nil?
+            [self]
+        else
+            [@list]
+        end
+    end
+    def to_s
+        "#{@field}: #{@value}"
+    end
+    attr_reader :field, :value
+end
+
+class Xmms::Collection
+    def to_s
+        "\n#{$type_names[self.type]}\n" +
+        self.attributes.collect do |k, v|
+            "#{k}: #{v}"
+        end.join("\n") +
+        self.operands.to_a.collect do |co|
+            co.to_s.lines.collect do |l|
+                "   " + l
+            end.join("")
+        end.join("")
+    end
+end
+
+class Collection < Xmms::Collection
+    def initialize (type)
+        super(type)
+    end
+end
+
+#{{{Xmms Collections Based Functions
+class CollectionFunc < Collection
+    include Function
+    def return
+        [self]
+    end
+end
+
+# A comparison collection
+# uses one of the available comparisons
+# using a FieldSpec
+class CmpCollection < CollectionFunc
+    include Listable
+    def initialize (type)
+        super(type)
+        self.operands << Collection.universe
+    end
+    def push (o)
+        if (o.is_a?(FieldSpec))
+            self.attributes["field"] = o.field
+            self.attributes["value"] = o.value.to_s # xmms2 won't convert for us :<
+        elsif (o.is_a?(Array))
+            @list = o.collect{|x| CmpCollection.new(self.type).push(x)}
+        else
+            raise WrongType.new(o.class, self)
+        end
+        self
+    end
+    def arity
+        1
+    end
+    def return
+        if @list.nil?
+            if attributes["field"].nil? || attributes["value"].nil?
+                raise NotEnoughArguments.new(self)
+            end
+            super
+        else
+            [@list]
+        end
+    end
+end
+
+class BoolCollection < CollectionFunc
+    include Listable
+    def push(o)
+        if (!o.is_a?(Array))
+            if (is_compl?)
+                operands.push(o)
+            else
+                raise WrongType.new(o.class, "BoolCollection")
+            end
+        else
+            o.each do |x| 
+                begin
+                    if is_compl?
+                        @list.push BoolCollection.new(type)
+                    else
+                        operands.push(x)
+                    end
+                rescue TypeError
+                    raise WrongType.new(x.class, self.class)
+                end
+            end
+        end
+        self
+    end
+    def is_compl?
+        type == Xmms::Collection::TYPE_COMPLEMENT
+    end
+    def arity
+        1
+    end
+    def return
+        [self]
+    end
+end
+#}}}
+#{{{ Stack operations
+class StackOperation
+    include Function
+    def initialize
+        @my_stack = []
+    end
+    def push(o)
+        @my_stack << o
+    end
+    def return
+        @my_stack
+    end
+end
+
+class MathOperation
+    include Function
+    def initialize(operator)
+        @op = operator
+        @operands = []
+    end
+    def push(o)
+        @operands.push(o)
+    end
+    def arity
+        2
+    end
+    def return
+        [@operands.reduce(@op)]
+    end
+end
+
+class Restart
+    def arity
+        0
+    end
+    def push(o)
+    end
+    def return
+        exec $0
+    end
+end
+class SaveCollection < StackOperation
+    # This is just a stack operation
+    # because of the convenient @my_stack
+    # provided
+    include Function
+    def initialize(ns=Xmms::Collection::NS_COLLECTIONS)
+        @namespace = ns
+        super()
+    end
+    def return
+        begin
+            $xc.coll_save(@my_stack[0], @my_stack[1], @namespace).wait
+        rescue TypeError => e
+            puts e
+            raise WrongType
+        end
+        @my_stack.take(1)
+    end
+end
+class Duplicate
+    include Function
+    def initialize
+        @my_ob = nil
+    end
+    def push(o)
+        @my_ob = o
+    end
+    def arity
+        1
+    end
+    def return
+        # Yes, this is a bit wrong since
+        # it should actually duplicate...
+        # oh well.
+        [@my_ob, @my_ob]
+    end
+end
+class ClearStack < StackOperation
+    def push(o)
+    end
+    def arity
+        -1
+    end
+end
+class PopStack < ClearStack
+    def arity
+        1
+    end
+end
+class Swap < StackOperation
+    def arity
+        2
+    end
+    def push(o)
+        @my_stack.unshift(o)
+    end
+end
+class Rotate < StackOperation
+    # also called dig because it
+    # digs out the bottom element in
+    # the stack
+    def return
+        @my_stack.rotate
+    end
+end
+class Reverse < Swap
+    def arity
+        -1
+    end
+end
+class PrintHead < StackOperation
+    def arity
+        1
+    end
+    def return
+        print @my_stack[-1]
+        super
+    end
+end
+
+class PrintColl < StackOperation
+    # Eventually this function will take a
+    # special kind of object that wraps a collection
+    # and does everything after the query_info
+    # This is to allow for things like presenting the collection
+    # in dxmms2
+    def print_coll(collection, fields=%w[id artist album title])
+        ids = $xc.coll_query_ids(collection).wait.value
+        $stdout.write(construct_tlv("coll", Marshal.dump(ids)))
+    end
+    def push(o)
+        if !o.is_a?(Collection)
+            raise WrongType.new(o.class, self)
+        else
+            super
+        end
+    end
+    def arity
+        1
+    end
+    def return
+        print_coll(@my_stack.last)
+        super
+    end
+end
+
+class AddToPlaylist < StackOperation
+    def arity
+        1
+    end
+    def return
+        res = $xc.playlist.add_collection(@my_stack.last, []).wait
+        if (res.error?)
+            puts res.error
+        end
+        super
+    end
+end
+class PrintStack < StackOperation
+    def arity
+        -1
+    end
+    def return
+        @my_stack.each_with_index do |item,i|
+            $stdout.write(construct_tlv("str", "%3d. %-s\n" % [i, item]))
+        end
+        super
+    end
+end
+#}}}
+
+class Cons
+    include Function
+    def initialize
+        # Note this is _not_
+        # equivalent to an empty list
+        # [] is the empty list
+        @my_list = nil
+    end
+    def push(o)
+        if !@my_list.nil?
+            @my_list.push(o)
+        else
+            if !o.is_a?(Array)
+                if o.respond_to?(:to_a)
+                    # Coerce it into an array
+                    @my_list = o.to_a
+                    if !@my_list.is_a?(Array)
+                        @my_list = [@my_list]
+                    end
+                else
+                    @my_list = [o]
+                end
+            else
+                @my_list = o
+            end
+        end
+    end
+    def arity
+        1
+    end
+    def return
+        if @my_list.nil?
+            raise NotEnoughArguments.new(self)
+            puts "got an o = #{o}"
+            puts "got an o = #{o}"
+        else
+            [@my_list]
+        end
+    end
+end
+class Car
+    include Function
+    def initialize
+        @my_list = nil
+    end
+    def push(o)
+        @my_list = o
+    end
+    def return
+        [@my_list, @my_list.last]
+    end
+end
+class List < Cons
+    def initialize
+        @my_list = []
+    end
+    def arity
+        -1
+    end
+end
+class Draw
+    def initialize
+        @tuple_list = []
+        @columns = []
+    end
+    def push(o)
+    end
+end
+#puts $classes
+#puts $token_pat
+#puts $token_table.values
+#puts $coll_types
+
+# returns the tokens belonging
+# to the string.
+# We allow multiple tokens to be returned
+# in order to make aliasing easier
+def get_token(string)
+    case string
+    when /'(\S+)/
+        $1
+    when *$token_table.keys
+        $token_table[string]
+    when $pats[:int]
+        $&.to_i
+    when /\A
+        \[
+            (.*)
+        \]
+        \Z/x
+        a = $1.split(/\s*,\s*/)
+        a.collect{|elem| get_token(elem)}
+    else
+        string
+    end
+end
+
+def pre_proc(string)
+    newparts = Array.new
+    # List of operators with a "+" appended
+    # These mean to automatically add everything
+    # on the stack to a list
+    autolisters = $fn_syms.values_at(:op, :field, :quant).reduce(:+).collect{|x|x[1]}.reduce(:+).collect{|op| op + "+"}
+    string.split(/\s*;\s*/).each do |s|
+        case s
+        when *autolisters
+            newparts = ["list", s[0..-2]]
+        when /\A\Z/ #empty lines
+            nil
+        else
+            newparts << s
+        end
+    end
+    newparts
+end
+
+def construct_tlv(tag, value)
+    [tag,value.to_s.length,value].pack("a4L<a*")
+end
+
+def build_collection (input)
+    vstack = Array.new
+    
+    class <<vstack#{{{
+        def empty?
+            self.length == 0 or self.last == :empty
+        end
+        def push(item)
+            if self.last == :empty
+                self[-1] = item
+            else
+                super item
+            end
+        end
+        def pop
+            if self.last == :empty
+                nil
+            else
+                super
+            end
+        end
+        def length
+            self.reverse.take_while{|e| e != :empty}.length
+        end
+        # _pops_ at most num operands from the stack
+        def get_ops(num)
+            operands = Array.new
+            while !empty? and !(operands.length >= num)
+                operands << pop
+            end
+            operands.reverse
+        end
+        alias :<< :push
+    end
+    #}}}
+    opstack = Array.new # [ [aFunction <arguments needed>] ]
+
+    do_token_func = Proc.new do |token|#{{{
+        fn = Function.create(token)
+        begin
+            if fn.arity < 0 
+                num_ops = vstack.length 
+            else
+                num_ops = fn.arity
+            end
+            operands = vstack.get_ops(num_ops)
+            if operands.length < num_ops
+                if $DO_CURRYING
+                    opstack << [fn, fn.arity - operands.length]
+                else
+                    raise NotEnoughArguments.new(token)
+                end
+            else
+                operands.each {|op| fn.push(op)}
+                fn.return.each {|r| vstack << r}
+            end
+        rescue NotEnoughArguments
+            if (token == :m_mult)
+                vstack << '*'
+            end
+        rescue WrongType,NotEnoughArguments => err
+            operands.each {|op| vstack << op}
+            input.print construct_tlv("err", err.message)
+        end
+    end
+    #}}}
+    input.each do |line|
+        line.chomp! # in case we're reading from stdin
+        pre_proc(line).map{|p|get_token(p)}.each do |t|
+            if $fn_syms.values.collect{|x|x.transpose[0]}.reduce(:+).include?(t)
+                do_token_func[t]
+            else
+                vstack << t
+            end
+
+            # check delayed/curried operations
+            while !opstack.empty? and !vstack.empty?
+                operands = vstack.get_ops(opstack.last[1])
+                operands.each{|op| opstack.last[0].push(op)}
+                opstack.last[1] -= operands.length
+                if opstack.last[1] == 0
+                    vstack << opstack.pop[0].return
+                end
+            end
+            #print "\nvstack = #{vstack}\nopstack = #{opstack}\ntoken = #{t}\n"
+        end
+        input.write construct_tlv("ack", "")
+        #puts vstack.last
+    end
+    vstack.pop
+end
+
+class UNIX_io
+    def initialize
+        begin
+        File.unlink($SOCKET_PATH)
+        rescue
+            "no previous socket"
+        end
+        @sock = UNIXServer.new($SOCKET_PATH)
+        @sock.listen(5)
+    end
+    def run
+        while true
+            client = @sock.accept
+            fork {
+                puts "[#{$$}]client connected"
+                old_stdout = $stdout.dup
+                $stdout = client
+                class << $stdout
+                    def print(string)
+                        super construct_tlv("str", string)
+                    end
+                end
+                begin
+                    build_collection(client)
+                rescue => e
+                    client.send(construct_tlv("err", e))
+                end
+                $stdout = old_stdout
+                puts "[#{$$}]client disconnected"
+                client.close
+            }
+        end
+    end
+end
+#UNIX_input.new.each do |line|
+#end
+fork {
+    UNIX_io.new.run
+    File.new($FILE_LOCK, "w").flock( File::LOCK_UN | File::LOCK_EX )
+}
+
+END {
+    print $SOCKET_PATH
+}

@@ -7,7 +7,7 @@ require 'socket'
 # for dmenu              #
 ##########################
 
-#$CONFIG = File.join(Dir.home + ".config/dxmms2")
+$COMMAND_SIG = "@"
 # default configs {{{
 $SCREEN_WIDTH=600
 $FONT_WIDTH=14 #in pixels
@@ -111,10 +111,8 @@ def extract_medialib_info(id, *fields)
 end
 
 def pl_list(start=nil,nentries=nil,prompt="Track: ")
-    morestring="--More--"
-    endstring="--End--"
-    startstring="--Start--"
-    backstring="--Back--"
+    morestring,endstring,startstring,backstring = 
+        %w[more end start back].map{|w| $COMMAND_SIG + w}
     listing=1
     nentries = (nentries.nil? ? $LIST_ENTRIES_PER_PAGE : nentries)
     pos = nil
@@ -192,7 +190,7 @@ def decode_xmms2_url (url)
     #echo "$(perl -MURI::Escape -e 'print uri_unescape($ARGV[0]);' "$url")" 
 end
 
-$commands=%w<toggle list +fav prev next stop info change-playlist clear edit-metadata search repeat-playlist repeat-track repeat-off remove shutdown>
+$commands=%w<toggle list +fav tag prev next stop info change-playlist clear edit-metadata search repeat-playlist repeat-track repeat-off remove shutdown>
 
 $xc = Xmms::Client.new("dxmms2")
 begin
@@ -300,6 +298,39 @@ while (true) do
         id = $xc.playback_current_id.wait.value
         old_favorite = extract_medialib_info(id, :favorite)[:favorite].to_i
         $xc.medialib_entry_property_set(id, :favorite, old_favorite+1).wait
+        break
+    when "tag"
+        # TODO: refcount the tags in the tag file so they get removed
+        # when no file is tagged with them
+        id = $xc.playback_current_id.wait.value
+        tag_file = File.join([Dir.home] + %w[.config xmms2 usertags])
+        all_tags = File.new(tag_file,File::CREAT).to_a
+        begin
+            previous_tags = extract_medialib_info(id, :usertags)[:usertags].lines.to_a
+        rescue
+            previous_tags = []
+        end
+        previous_tags.map!{|x| x.chomp}
+
+        tag_list = previous_tags.map{|k| "!" + k} + all_tags
+        tag_list.map!{|x| x.chomp}
+        tag = my_dmenu(tag_list, prompt="Add/delete a tag")
+        if (!tag.empty?)
+            if (tag[0] == "!")
+                previous_tags.delete(tag[1..-1])
+            else
+                previous_tags << tag
+                all_tags << tag + "\n"
+                all_tags.uniq!
+            end
+            File.open(tag_file, "w") do |file|
+                all_tags.each do |t|
+                    file.write(t)
+                end
+
+            end
+            $xc.medialib_entry_property_set(id, :usertags, previous_tags.uniq.join("\n")).wait
+        end
         break
     when "change-playlist"
         playlists = $xc.playlist_list.wait.value

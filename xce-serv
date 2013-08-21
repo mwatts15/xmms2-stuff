@@ -6,12 +6,11 @@ require 'socket'
 # An xmms2 collection editor/viewer #
 # tool based on reverse-polish      #
 # notation calculators              #
-#       (c) Mark W. 2012            #
+#       (c) Mark W. 2013            #
 #-----------------------------------#
-# Set this to true if you wan't
+# Set this to true if you want
 # functions to be curried rather
 # than just raising NotEnoughArguments
-$DO_CURRYING = false
 $SOCKET_PATH = "/tmp/#{ENV["USER"]}-xce-ipc-socket"
 
 $FILE_LOCK = "#{Xmms::userconfdir}/xce.lock"
@@ -41,8 +40,6 @@ end
 
 $empty_sym = [:empty, ['~']]
 
-$classes = [:op, :quant]
-
 $fn_syms = { 
     :op =>
     [[:op_and, %w(a and), Xmms::Collection::TYPE_INTERSECTION],
@@ -57,6 +54,7 @@ $fn_syms = {
         [:q_has, %w(has), Xmms::Collection::TYPE_HAS],
         [:q_le, %w(<= le), Xmms::Collection::TYPE_SMALLEREQ],
         [:q_match, %w(m match), Xmms::Collection::TYPE_MATCH],
+        [:q_ref, %w(in), Xmms::Collection::TYPE_REFERENCE],
         [:q_eq, %w(= eq), Xmms::Collection::TYPE_EQUALS]],
     :field =>
     [[:f_artist, %w(ar artist), "artist"],
@@ -310,6 +308,7 @@ end
 class Collection < Xmms::Collection
     def initialize (type)
         super(type)
+        @type = type
     end
 end
 
@@ -331,13 +330,20 @@ class CmpCollection < CollectionFunc
         self.operands << Collection.universe
     end
     def push (o)
-        if (o.is_a?(FieldSpec))
-            self.attributes["field"] = o.field
-            self.attributes["value"] = o.value.to_s # xmms2 won't convert for us :<
-        elsif (o.is_a?(Array))
-            @list = o.collect{|x| CmpCollection.new(self.type).push(x)}
+        if @type == Xmms::Collection::TYPE_REFERENCE
+            self.attributes["reference"] = o
+            self.attributes["namespace"] = "Collections"
         else
-            raise WrongType.new(o.class, self)
+            if (o.is_a?(FieldSpec))
+                self.attributes["field"] = o.field
+                self.attributes["value"] = o.value.to_s # xmms2 won't convert for us :<
+            elsif (o.is_a?(String))
+                self.attributes["field"] = o
+            elsif (o.is_a?(Array))
+                @list = o.collect{|x| CmpCollection.new(@type).push(x)}
+            else
+                raise WrongType.new(o.class, self)
+            end
         end
         self
     end
@@ -346,9 +352,6 @@ class CmpCollection < CollectionFunc
     end
     def return
         if @list.nil?
-            if attributes["field"].nil? || attributes["value"].nil?
-                raise NotEnoughArguments.new(self)
-            end
             super
         else
             [@list]
@@ -555,8 +558,12 @@ class PrintStack < StackOperation
         -1
     end
     def return
-        @my_stack.each_with_index do |item,i|
-            $stdout.write(construct_tlv("str", "%3d. %-s\n" % [i, item]))
+        if @my_stack.empty?
+            $stdout.write(construct_tlv("str", "Empty stack"))
+        else
+            @my_stack.each_with_index do |item,i|
+                $stdout.write(construct_tlv("str", "%3d. %-s\n" % [i, item]))
+            end
         end
         super
     end
@@ -596,8 +603,6 @@ class Cons
     def return
         if @my_list.nil?
             raise NotEnoughArguments.new(self)
-            puts "got an o = #{o}"
-            puts "got an o = #{o}"
         else
             [@my_list]
         end
@@ -631,10 +636,6 @@ class Draw
     def push(o)
     end
 end
-#puts $classes
-#puts $token_pat
-#puts $token_table.values
-#puts $coll_types
 
 # returns the tokens belonging
 # to the string.
@@ -730,11 +731,7 @@ def build_collection (input)
             end
             operands = vstack.get_ops(num_ops)
             if operands.length < num_ops
-                if $DO_CURRYING
-                    opstack << [fn, fn.arity - operands.length]
-                else
-                    raise NotEnoughArguments.new(token)
-                end
+                raise NotEnoughArguments.new(token)
             else
                 operands.each {|op| fn.push(op)}
                 fn.return.each {|r| vstack << r}
@@ -752,7 +749,7 @@ def build_collection (input)
     input.each do |line|
         line.chomp! # in case we're reading from stdin
         pre_proc(line).map{|p|get_token(p)}.each do |t|
-            if $fn_syms.values.collect{|x|x.transpose[0]}.reduce(:+).include?(t)
+            if $token_table.values.include?(t)
                 do_token_func[t]
             else
                 vstack << t
@@ -788,7 +785,7 @@ class UNIX_io
     def run
         while true
             client = @sock.accept
-            fork {
+            pid = fork {
                 puts "[#{$$}]client connected"
                 old_stdout = $stdout.dup
                 $stdout = client
@@ -806,15 +803,17 @@ class UNIX_io
                 puts "[#{$$}]client disconnected"
                 client.close
             }
+            Process.detach(pid)
         end
     end
 end
 #UNIX_input.new.each do |line|
 #end
-fork {
+pid = fork {
     UNIX_io.new.run
     File.new($FILE_LOCK, "w").flock( File::LOCK_UN | File::LOCK_EX )
 }
+Process.detach(pid)
 
 END {
     print $SOCKET_PATH

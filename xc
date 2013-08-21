@@ -50,8 +50,7 @@ end
 
 $prompt = Fiber.new do
     while true
-        $receiver.transfer
-        input = Readline.readline('xmms2-coll> ', false)
+        input = Readline.readline('xmms2-coll> ', true)
         if input
             input << "\n"
             begin
@@ -66,11 +65,13 @@ $prompt = Fiber.new do
         else
             break
         end
+        $receiver.transfer
     end
 end
 
 $receiver = Fiber.new do
     while true
+        retry_count = 0
         begin
         tag = $xce_connection.recv_nonblock(4).unpack("A4")[0]
         length = $xce_connection.recv(4).unpack("L<")[0]
@@ -102,9 +103,16 @@ $receiver = Fiber.new do
         when "ack"
         else
             puts "NONE OF THEM"
+            puts tag + value
         end
         rescue IO::WaitReadable 
-            $prompt.transfer
+            if (retry_count < 5)
+                retry_count += 1
+                sleep(0.05)
+                retry
+            else
+                $prompt.transfer
+            end
         end
     end
 end

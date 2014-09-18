@@ -30,6 +30,16 @@ class Integer
     end
 end
 
+def time_string_to_ms(str)
+    res = 0
+    s = 1
+    for n in str.split(":").reverse do
+        s = 60 * s
+        res = res + s * (n.to_i)
+    end
+    return res.to_i
+end
+
 class String
     def initialize
         super
@@ -111,18 +121,29 @@ def extract_medialib_info(id, *fields)
 end
 
 def pl_list(start=nil,nentries=nil,prompt="Track: ")
+    entries = $pl.entries.wait.value
+    current = $pl.current_pos.wait.value
+    cur = current.nil? ? 0 : current[:position] 
+    start = start.nil? ? cur : start
+    list_ids(entries,prompt,start,nentries)
+end
+
+def list_ids(entries,prompt,start=0,nentries=nil, commands=Hash.new)
+    # XXX: Create a list object to pass to user-supplied commands
+    #      list object allows for setting list start, page size, list content, whether to redisplay the list, and maybe other things
     morestring,endstring,startstring,backstring = 
         %w[more end start back].map{|w| $COMMAND_SIG + w}
+    c1 = Hash.new
+    commands.each do |k,v|
+        c1["@"+k] = v
+    end
     listing=1
     nentries = (nentries.nil? ? $LIST_ENTRIES_PER_PAGE : nentries)
     pos = nil
-    current = $pl.current_pos.wait.value
-    list_start = start.nil? ? 
-        (!current.nil? ? current[:position] : 0) : start
+    list_start = start
     while ( listing == 1 ) do
         start_clamped = false
         end_clamped = false
-        entries = $pl.entries.wait.value
         items = Array.new
 
         #clamps start
@@ -153,8 +174,12 @@ def pl_list(start=nil,nentries=nil,prompt="Track: ")
             items << morestring
         end
 
+        c1.keys.each do |d|
+            items << d
+        end
+
         choice = my_dmenu(items, prompt, items.length).gsub(/^\s+|\s+$/, "")
-        pos = choice[/^-?\d+|#{morestring}|#{backstring}|#{startstring}|#{endstring}/]
+        pos = choice[/^-?\d+|#{$COMMAND_SIG}\w+/]
 
         case pos
         when backstring
@@ -165,6 +190,10 @@ def pl_list(start=nil,nentries=nil,prompt="Track: ")
             list_start = entries.length - nentries
         when startstring
             list_start = 0
+        when *(c1.keys)
+            f = c1[pos]
+            f.call(entries)
+            listing = 0
         else
             listing = 0
         end
@@ -190,7 +219,102 @@ def decode_xmms2_url (url)
     #echo "$(perl -MURI::Escape -e 'print uri_unescape($ARGV[0]);' "$url")" 
 end
 
-$commands=%w<toggle list +fav tag prev next stop info change-playlist clear edit-metadata search repeat-playlist repeat-track repeat-off remove shutdown>
+def get_usertags(id)
+    info = extract_medialib_info(id, :usertags)
+    if info.has_key?(:usertags)
+        info[:usertags].lines.to_a
+    else
+        []
+    end
+end
+
+def set_tags(id, tags)
+    $xc.medialib_entry_property_set(id, :usertags, tags.map{|x| x.chomp}.uniq.join("\n")).wait
+end
+
+def tag_track(id, tag)
+    tags = get_usertags(id) << tag.chomp
+    set_tags(id, tags)
+end
+
+def untag_track(id, tag)
+    tags = get_usertags(id).reject{|x|x==tag}
+    set_tags(id, tags)
+end
+
+def tag_menu(ids, previous_tags)
+    tag_file = File.join(Xmms::userconfdir, 'usertags')
+    all_tags = File.new(tag_file,File::CREAT).to_a
+
+    previous_tags = previous_tags.map{|x| x.chomp}
+
+    tag_list = previous_tags.map{|k| "!" + k} + all_tags
+    tag_list.map!{|x| x.chomp}
+
+    tag = my_dmenu(tag_list, "Add/delete a tag")
+    if (!tag.empty?)
+        Thread.new do 
+            if (tag[0] == "!")
+                ids.each do |id|
+                    untag_track(id, tag[1..-1])
+                end
+            else
+                ids.each do |id|
+                    tag_track(id, tag)
+                end
+            end
+        end
+
+
+        if (tag[0] != "!")
+            all_tags << tag + "\n"
+            all_tags.uniq!
+        end
+        File.open(tag_file, "w") do |file|
+            all_tags.each do |t|
+                file.write(t)
+            end
+        end
+        tag
+    else
+        nil
+    end
+end
+
+def get_album_ids(id)
+    album_name = extract_medialib_info(id, :album)[:album]
+    album_coll = match_collection('album', album_name)
+
+    $xc.coll_query_ids(album_coll).wait.value
+end
+
+def match_collection(field, pattern)
+    coll = Xmms::Collection.new(Xmms::Collection::TYPE_MATCH)
+    coll.operands << Xmms::Collection.universe
+    coll.attributes["field"] = field
+    coll.attributes["value"] = pattern
+    coll
+end
+
+# The idea of this is that if I like a song around the middle of the track, I think it's a
+# really good song and it's probably new since I had to listen halfway through to decide
+# I liked it. I also consider that there may be an over-eagerness in my reaction early in
+# a track, so I penalize that. Lastly, for me, if I like the track near the end, I'm only 
+# sort-of listening to it or only like it enough to appreciate it as a whole, but can't
+# say much for it in parts.
+#
+# This should only be used additively with past `likes'
+def track_appreciation_factor(playtime, track_duration)
+    k = [0, [playtime, track_duration].min].max.to_f / track_duration - 0.5
+    l = 1.0 - k.abs
+    l
+end
+
+$commands=%w<toggle list +fav +fav-album 
+tag tag-album prev next stop 
+info change-playlist clear edit-metadata search 
+shuffle repeat-playlist repeat-track repeat-off remove 
+shutdown seek>
 
 $xc = Xmms::Client.new("dxmms2")
 begin
@@ -208,6 +332,7 @@ rescue Xmms::Client::ClientError => e
         `xmms2-launcher -vvvv`
         ntries += 1
     end
+    $xc.connect()
     $stderr.puts "Connected."
 end
 $pl = $xc.playlist
@@ -218,10 +343,6 @@ while (true) do
         # NOTE: The *break statements* in here are for the *while loop*
         #       not for the switch
     when "list"
-        # requires 
-        #  CLASSIC_LIST=true
-        #  CLASSIC_LIST_FORMAT=${artist}::${title}
-        # in .config/xmms2/clients/nycli.conf
         pos = pl_list(nil, nil, "Play Track:")
         if not pos.nil?
             puts "moving to positon #{pos}"
@@ -237,13 +358,15 @@ while (true) do
         if not entries.nil?
             pos = pl_list(nil,nil,"Track Info:")
             id = entries[pos]
-            info = extract_medialib_info(id, *%w<artist title album tracknr favorite timesplayed url date duration laststarted added>)
+            info = extract_medialib_info(id, *%w<artist title album tracknr favorite timesplayed url date duration laststarted added usertags comment>)
             info = Hash[info.map { |k,v| 
                 k = k.to_s
                 if %w<duration>.include?(k) 
                     v = [v.to_i.ms_to_time_string, v]
                 elsif %w<laststarted added lmod>.include?(k)
                     v = [Time.at(v.to_i).strftime("%F"), v]
+                elsif k == "usertags"
+                    v = [v.gsub(%r{\n}, ", ")]
                 else
                     v = [v]
                 end
@@ -251,106 +374,99 @@ while (true) do
             }]
             while true
                 field = my_dmenu(info.map {|k,v| "#{k} |||#{v[0]}"}, "Info", info.size)
-                field = field[/^[^ ]+/]
-                values = info[field]
-                if values.length > 1
-                    value = my_dmenu(values.map{ |v| v.to_s }, "Version?")
-                else
-                    value = values[0]
-                end
-                operation = my_dmenu(%w<copy back>, value) 
-                case operation
-                when "copy"
-                    `echo '#{value}' | xsel -i`
+                if field.empty?
                     break
-                when "back"
                 else
-                    break
+                    field = field[/^[^ ]+/]
+                    values = info[field]
+                    if values.length > 1
+                        value = my_dmenu(values.map{ |v| v.to_s }, "Version?")
+                    else
+                        value = values[0]
+                    end
+                    operation = my_dmenu(%w<copy back>, value) 
+                    case operation
+                    when "copy"
+                        `echo '#{value}' | xsel --clipboard -i`
+                        break
+                    when "back"
+                    else
+                        break
+                    end
                 end
             end
         end
         break
     when "search"
-        socket_path = `xce-serv`
-        xce_connection = UNIXSocket.new(socket_path)
-        while true
-            input = my_dmenu([], "field choice:")
-            if input
-                begin
-                    result = xce_connection.send(input, Socket::MSG_PEEK)
-                rescue Exception => e
-                    puts "got an exception #{e}"
-                end
-                if result != input.length
-                    break
-                end
-            else
-                break
+        fields = ["artist", "title", "genre", "album"]
+        choice = my_dmenu(fields, prompt="Field")
+        # XXX: Save and display past searches
+        search_string = my_dmenu([],prompt="Search string")
+        coll = match_collection(choice, search_string)
+        d = $xc.coll_query_ids(coll).wait.value
+        def add(ids)
+            ids.each do |z|
+                $pl.add_entry(z).wait
             end
-            my_dmenu([], xce_connection.recv(100))
         end
+        cs = Hash.new 
+        cs["add"] = proc { |k| add(k) } # thunk it!
+        list_ids(d, prompt="Results", start=0, nentries=$LIST_ENTRIES_PER_PAGE, commands=cs)
         break
     when "remove"
-        pos = pl_list(nil,nil,"Remove entry:")
-        $pl.remove_entry(pos).wait
-        break
-    when "+fav"
-        id = $xc.playback_current_id.wait.value
-        old_favorite = extract_medialib_info(id, :favorite)[:favorite].to_i
-        $xc.medialib_entry_property_set(id, :favorite, old_favorite+1).wait
-        break
-    when %r{tag(-album)?}
-        # TODO: 
-        # - refcount the tags in the tag file so they get removed
-        # when no file is tagged with them
-        # - Make sure tags can't be created with newlines 
-        
-        should_tag_album = (command == "tag-album")
-
-        current_id = $xc.playback_current_id.wait.value
-        tag_file = File.join(Xmms::userconfdir, 'usertags')# XXX: Should close file, but short-lived execution
-        all_tags = File.new(tag_file, File::CREAT).to_a
-        current_info = extract_medialib_info(current_id, :album)
-
-        ids = if should_tag_album
-                  album = current_info[:album]
-                  coll = Xmms::Collection.new(Xmms::Collection::TYPE_MATCH)
-                  coll.attributes["field"] = 'album'
-                  coll.attributes["value"] = album
-                  $xc.coll_query_ids(coll).wait
-              else
-                  [current_id]
-              end
-
-        previous_tags = ids.reduce do |id, tags| 
-            info = extract_medialib_info(id, :usertags)
-            tags & info.has_key?(:usertags) ? info[:usertags].lines.to_a : []
-        end.map{|x| x.chomp}
-
-        tag_list = (previous_tags.map{|k| "!" + k} + all_tags).map{|x| x.chomp}
-        tag = my_dmenu(tag_list, prompt="Add/delete a tag")
-        if (!tag.empty?)
-            if (tag[0] == "!")
-                previous_tags.delete(tag[1..-1])
+        while true
+            pos = pl_list(nil,nil,"Remove entry:")
+            if pos.nil?
+                break
             else
-                previous_tags << tag
-                all_tags << tag + "\n"
-                all_tags.uniq!
+                $pl.remove_entry(pos).wait
             end
-            File.open(tag_file, "w") do |file|
-                all_tags.each do |t|
-                    file.write(t)
-                end
-
-            end
-            ids $xc.medialib_entry_property_set(id, :usertags, previous_tags.uniq.join("\n")).wait
         end
         break
+    when "+fav"
+        begin
+            id = $xc.playback_current_id.wait.value
+            p = $xc.playback_playtime.wait.value
+            data = extract_medialib_info(id, :favorite, :duration)
+            old_favorite = data[:favorite].to_f
+            duration = data[:duration].to_i
+            appreciation = track_appreciation_factor(p, duration)
+            $xc.medialib_entry_property_set(id, :favorite, (old_favorite+appreciation).to_s).wait
+        end
+        break
+    when "+fav-album"
+        id = $xc.playback_current_id.wait.value
+        get_album_ids(id).each do |al_id|
+            old_favorite = extract_medialib_info(al_id, :favorite)[:favorite].to_f
+            $xc.medialib_entry_property_set(al_id, :favorite, old_favorite+1).wait
+        end
+        break
+    when "tag"
+        # TODO: refcount the tags in the tag file so they get removed
+        # when no file is tagged with them
+
+        id = $xc.playback_current_id.wait.value
+        while tag_menu([id], get_usertags(id))
+        end
+
+        break
+    when "tag-album"
+        begin
+            album_ids = get_album_ids(id)
+            while tag_menu(album_ids, [])
+            end
+        catch e
+            puts e
+        end
+
+        break
     when "change-playlist"
-        playlists = $xc.playlist_list.wait.value
-        playlists = playlists.delete_if {|s| s.start_with?("_")}
-        selected = my_dmenu(playlists)
-        $xc.playlist(selected).load.wait
+        begin
+            playlists = $xc.playlist_list.wait.value
+            playlists = playlists.delete_if {|s| s.start_with?("_")}
+            selected = my_dmenu(playlists)
+            $xc.playlist(selected).load.wait
+        end
         break
     when %r{repeat-(off|track|playlist)}
         case command.split(%r{-})[1]
@@ -365,8 +481,29 @@ while (true) do
             `xmms2 server config playlist.repeat_all 1`
         end
         break
+    when "shuffle"
+        $pl.shuffle.wait
+        break
     when "shutdown"
         `xmms2 server shutdown`
+        break
+    when "seek"
+        print $xc.playback_playtime.wait.value
+        id = $xc.playback_current_id.wait.value
+        info = extract_medialib_info(id, :duration)
+        dur = info[:duration].to_i 
+        interval_size = dur / 10
+        times = []
+        times << ["start",  0]
+        Range.new(0,dur).step(interval_size).each do |x|
+            times << [x.ms_to_time_string, x]
+        end
+        times << ["end", dur]
+        seek_location = my_dmenu(times.map{|x| x[0]}).to_s
+        # FIXME: This math is clearly janky. Sadly I have actual work to do.
+        seek = 20 * time_string_to_ms(seek_location)
+        puts $xc.playback_seek_ms(seek).wait.value
+        $stdout.flush
         break
     else
         if not command.empty?

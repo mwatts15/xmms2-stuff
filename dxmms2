@@ -70,6 +70,7 @@ end
 
 def my_dmenu (entries, prompt='dxmms2', height=entries.count, width=$SCREEN_WIDTH)
     res = ""
+    height = [height, 20].min
     entries.collect! do |line|
         l, r = line.split("|||")
         #puts "width=" + width.to_s
@@ -87,7 +88,6 @@ def my_dmenu (entries, prompt='dxmms2', height=entries.count, width=$SCREEN_WIDT
         io.close_write
         res = io.gets
     end
-    printf "res = #{res}\n"
     res.to_s.chomp
 end
 
@@ -299,21 +299,35 @@ while (true) do
         old_favorite = extract_medialib_info(id, :favorite)[:favorite].to_i
         $xc.medialib_entry_property_set(id, :favorite, old_favorite+1).wait
         break
-    when "tag"
-        # TODO: refcount the tags in the tag file so they get removed
+    when %r{tag(-album)?}
+        # TODO: 
+        # - refcount the tags in the tag file so they get removed
         # when no file is tagged with them
-        id = $xc.playback_current_id.wait.value
-        tag_file = File.join([Dir.home] + %w[.config xmms2 usertags])
-        all_tags = File.new(tag_file,File::CREAT).to_a
-        begin
-            previous_tags = extract_medialib_info(id, :usertags)[:usertags].lines.to_a
-        rescue
-            previous_tags = []
-        end
-        previous_tags.map!{|x| x.chomp}
+        # - Make sure tags can't be created with newlines 
+        
+        should_tag_album = (command == "tag-album")
 
-        tag_list = previous_tags.map{|k| "!" + k} + all_tags
-        tag_list.map!{|x| x.chomp}
+        current_id = $xc.playback_current_id.wait.value
+        tag_file = File.join(Xmms::userconfdir, 'usertags')# XXX: Should close file, but short-lived execution
+        all_tags = File.new(tag_file, File::CREAT).to_a
+        current_info = extract_medialib_info(current_id, :album)
+
+        ids = if should_tag_album
+                  album = current_info[:album]
+                  coll = Xmms::Collection.new(Xmms::Collection::TYPE_MATCH)
+                  coll.attributes["field"] = 'album'
+                  coll.attributes["value"] = album
+                  $xc.coll_query_ids(coll).wait
+              else
+                  [current_id]
+              end
+
+        previous_tags = ids.reduce do |id, tags| 
+            info = extract_medialib_info(id, :usertags)
+            tags & info.has_key?(:usertags) ? info[:usertags].lines.to_a : []
+        end.map{|x| x.chomp}
+
+        tag_list = (previous_tags.map{|k| "!" + k} + all_tags).map{|x| x.chomp}
         tag = my_dmenu(tag_list, prompt="Add/delete a tag")
         if (!tag.empty?)
             if (tag[0] == "!")
@@ -329,7 +343,7 @@ while (true) do
                 end
 
             end
-            $xc.medialib_entry_property_set(id, :usertags, previous_tags.uniq.join("\n")).wait
+            ids $xc.medialib_entry_property_set(id, :usertags, previous_tags.uniq.join("\n")).wait
         end
         break
     when "change-playlist"

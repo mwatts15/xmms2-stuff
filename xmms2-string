@@ -1,0 +1,4 @@
+#!/bin/sh
+
+log_file=$HOME/.config/xmms2/xmms2-string.log 
+exec xmms2-string.rb &

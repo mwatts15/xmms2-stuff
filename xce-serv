@@ -11,6 +11,7 @@ require 'socket'
 # Set this to true if you want
 # functions to be curried rather
 # than just raising NotEnoughArguments
+# TODO: * be able to express "most popular album" as "for all tracks which have 'album' the same, sort by sum of 'favorite'"
 $SOCKET_PATH = "/tmp/#{ENV["USER"]}-xce-ipc-socket"
 
 $FILE_LOCK = "#{Xmms::userconfdir}/xce.lock"
@@ -64,6 +65,7 @@ $fn_syms = {
         [:f_timesplayed, %w(played timesplayed), "timesplayed"],
         [:f_url, %w(url uri), "url"],
         [:f_genre, %w(gen genre), "genre"],
+        [:f_usertags, %w(usertags utags), "usertags"],
         [:f_date, %w(dt yr date year), "date"]],
     :cmd =>
     [[:c_clear_stack, %w(cl)],
@@ -73,6 +75,7 @@ $fn_syms = {
         [:c_rotate, %w(rot dig)],
         [:c_dup, %w(dup)],
         [:c_add_to_playlist, %w(addp)],
+        [:c_clear_playlist, %w(clp)],
         [:c_print_head, %w(p)],
         [:c_print_stack, %w(ps)],
         [:c_save_coll, %w(save)],
@@ -207,6 +210,8 @@ module Function
             Swap.new
         when :c_add_to_playlist
             AddToPlaylist.new
+        when :c_clear_playlist
+            ClearPlaylist.new
         when :c_print_head
             PrintHead.new
         when :c_print_stack
@@ -447,11 +452,10 @@ class SaveCollection < StackOperation
     def return
         begin
             $xc.coll_save(@my_stack[0], @my_stack[1], @namespace).wait
-        rescue TypeError => e
-            puts e
+        rescue TypeError
             raise WrongType
         end
-        @my_stack.take(1)
+        @my_stack.drop(2)
     end
 end
 class Duplicate
@@ -548,11 +552,25 @@ class AddToPlaylist < StackOperation
     def return
         res = $xc.playlist.add_collection(@my_stack.last, []).wait
         if (res.error?)
-            puts res.error
+            raise res.error
         end
         super
     end
 end
+
+class ClearPlaylist < StackOperation
+    def arity
+        0
+    end
+    def return
+        res = $xc.playlist.clear.wait
+        if (res.error?)
+            raise res.error
+        end
+        super
+    end
+end
+
 class PrintStack < StackOperation
     def arity
         -1
@@ -719,7 +737,7 @@ def build_collection (input)
         alias :<< :push
     end
     #}}}
-    opstack = Array.new # [ [aFunction <arguments needed>] ]
+    opstack = Array.new
 
     do_token_func = Proc.new do |token|#{{{
         fn = Function.create(token)

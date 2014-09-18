@@ -6,7 +6,7 @@ require 'socket'
 # An xmms2 collection editor/viewer #
 # tool based on reverse-polish      #
 # notation calculators              #
-#       (c) Mark W. 2013            #
+#       (c) Mark W. 2014            #
 #-----------------------------------#
 # Set this to true if you want
 # functions to be curried rather

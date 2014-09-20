@@ -128,9 +128,10 @@ def pl_list(start=nil,nentries=nil,prompt="Track: ")
     list_ids(entries,prompt,start,nentries)
 end
 
-def list_ids(entries,prompt,start=0,nentries=nil, commands=Hash.new)
+def list_ids(entries, prompt, start=0, nentries=nil, commands=Hash.new)
     # XXX: Create a list object to pass to user-supplied commands
-    #      list object allows for setting list start, page size, list content, whether to redisplay the list, and maybe other things
+    #      list object allows for setting list start, page size, list content, 
+    #      whether to redisplay the list, and maybe other things
     morestring,endstring,startstring,backstring = 
         %w[more end start back].map{|w| $COMMAND_SIG + w}
     c1 = Hash.new
@@ -318,7 +319,7 @@ shutdown seek>
 
 $xc = Xmms::Client.new("dxmms2")
 begin
-$xc.connect()
+    $xc.connect()
 rescue Xmms::Client::ClientError => e
     $stderr.puts e
     `xmms2-launcher`
@@ -335,7 +336,21 @@ rescue Xmms::Client::ClientError => e
     $xc.connect()
     $stderr.puts "Connected."
 end
+
 $pl = $xc.playlist
+$xc.broadcast_playlist_loaded.notifier do |res|
+    $pl = $xc.playlist
+    true
+end
+
+def play_new_track(xc, pos=false)
+    if pos
+        xc.playlist_set_next(pos).wait
+    end
+    xc.playback_tickle.wait
+    xc.playback_stop.wait
+    xc.playback_start.wait
+end
 
 while (true) do
     command = my_dmenu($commands).chomp
@@ -346,11 +361,7 @@ while (true) do
         pos = pl_list(nil, nil, "Play Track:")
         if not pos.nil?
             puts "moving to positon #{pos}"
-            res = $xc.playlist_set_next(pos).wait.value
-            #puts res
-            $xc.playback_tickle.wait
-            $xc.playback_stop.wait
-            $xc.playback_start.wait
+            play_new_track($xc, pos)
         end
         break
     when "info"
@@ -411,7 +422,17 @@ while (true) do
         end
         cs = Hash.new 
         cs["add"] = proc { |k| add(k) } # thunk it!
-        list_ids(d, prompt="Results", start=0, nentries=$LIST_ENTRIES_PER_PAGE, commands=cs)
+        pos = list_ids(d, prompt="Results", start=0, nentries=$LIST_ENTRIES_PER_PAGE, commands=cs)
+
+        # Make the playlist collection
+        pl_coll = Xmms::Collection.new(Xmms::Collection::TYPE_IDLIST)
+        pl_coll.idlist = d
+        $xc.coll_save(pl_coll, 'search-result-list', Xmms::Collection::NS_PLAYLISTS)
+
+        # add the entry and load the playlist
+        pl = $xc.playlist('search-result-list')
+        pl.load.wait
+        play_new_track($xc, pos)
         break
     when "remove"
         while true

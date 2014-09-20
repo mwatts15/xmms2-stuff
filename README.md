@@ -6,7 +6,7 @@ Setting the dmenu width in dxmms2 requires the patch provided in this repo. The 
   ![dxmms2 screenie](/dxmms2.png)
 * xmms2-string.rb - a track-progression indicator for use in xmobar. Can be placed in `.config/xmms2/startup.d` to have it run when xmms2 starts up.
   You can configure xmobar with this line in `commands`: 
-```
-    , Run PipeReader "/tmp/YOUR_USER_NAME_HERE-xmms2-string-ipc-pipe" "xmms2_curr"
-```
+
+      , Run PipeReader "/tmp/YOUR_USER_NAME_HERE-xmms2-string-ipc-pipe" "xmms2_curr"
+
   replacing YOUR_USER_NAME_HERE with your user name.

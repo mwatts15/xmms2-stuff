@@ -120,9 +120,22 @@ def extract_medialib_info(id, *fields)
     res
 end
 
-def pl_list(start=nil,nentries=nil,prompt="Track: ")
-    entries = $pl.entries.wait.value
-    current = $pl.current_pos.wait.value
+def playlists_prompt(&call_back)
+    playlists = $xc.playlist_list.wait.value
+    playlists = playlists.delete_if {|s| s.start_with?("_")}
+    selected = my_dmenu(playlists)
+    if !call_back.nil?
+        if !selected.empty?
+            call_back.call(selected)
+        end
+    end
+    selected
+end
+
+def pl_list(start=nil,nentries=nil,prompt="Track: ",plname="Default")
+    pl = $xc.playlist(plname)
+    entries = pl.entries.wait.value
+    current = pl.current_pos.wait.value
     cur = current.nil? ? 0 : current[:position] 
     start = start.nil? ? cur : start
     list_ids(entries,prompt,start,nentries)
@@ -182,8 +195,6 @@ def list_ids(entries, prompt, start=0, nentries=nil, commands=Hash.new)
         choice = my_dmenu(items, prompt, items.length).gsub(/^\s+|\s+$/, "")
         pos = choice[/^-?\d+|#{$COMMAND_SIG}[a-zA-Z0-9\-_.]+/]
 
-        puts "pos = #{pos}"
-
         case pos
         when backstring
             list_start -= nentries
@@ -196,15 +207,23 @@ def list_ids(entries, prompt, start=0, nentries=nil, commands=Hash.new)
         when *(c1.keys)
             f = c1[pos]
             f.call(entries)
+            pos = nil
             listing = 0
         else
             listing = 0
         end
     end
-    if pos.nil? then return nil end
+
+    if pos.nil? 
+        return nil 
+    end
 
     pos = pos.to_i
-    if pos < 0 then entries.length + pos else pos end
+    if pos < 0 
+        entries.length + pos 
+    else 
+        pos 
+    end
 end
 
 def xmms2_ids_to_display_list_strings(ids, fields=%w[artist title url duration])
@@ -315,8 +334,8 @@ end
 
 $commands=%w<toggle list +fav +fav-album 
 tag tag-album prev next stop repeat-playlist
-info change-playlist remove-playlist search
-clear edit-metadata remove shuffle
+info change-playlist remove-playlist show-playlist
+clear edit-metadata remove shuffle search
 repeat-track repeat-off shutdown seek>
 
 
@@ -502,19 +521,22 @@ while (true) do
         break
     when "change-playlist"
         begin
-            playlists = $xc.playlist_list.wait.value
-            playlists = playlists.delete_if {|s| s.start_with?("_")}
-            selected = my_dmenu(playlists)
-            $xc.playlist(selected).load.wait
+             playlists_prompt do |selected|
+                $xc.playlist(selected).load.wait
+             end
         end
         break
     when "remove-playlist"
         begin
-            playlists = $xc.playlist_list.wait.value
-            playlists = playlists.delete_if {|s| s.start_with?("_")}
-            selected = my_dmenu(playlists)
-            if !selected.empty?
+             playlists_prompt do |selected|
                 $xc.playlist(selected).remove.wait
+             end
+        end
+        break
+    when "show-playlist"
+        begin
+            playlists_prompt do |selected|
+                pl_list(nil,nil,prompt=selected, plname=selected)
             end
         end
         break

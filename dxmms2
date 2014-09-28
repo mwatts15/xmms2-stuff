@@ -132,20 +132,20 @@ def playlists_prompt(&call_back)
     selected
 end
 
-def pl_list(start=nil,nentries=nil,prompt="Track: ",plname="Default")
-    pl = $xc.playlist(plname)
+def pl_list(start=nil,nentries=nil,prompt="Track: ",plname=nil)
+    pl = plname.nil? ? $xc.playlist : $xc.playlist(plname)
     entries = pl.entries.wait.value
     current = pl.current_pos.wait.value
-    cur = current.nil? ? 0 : current[:position] 
+    cur = current.nil? ? 0 : current[:position]
     start = start.nil? ? cur : start
     list_ids(entries,prompt,start,nentries)
 end
 
 def list_ids(entries, prompt, start=0, nentries=nil, commands=Hash.new)
     # XXX: Create a list object to pass to user-supplied commands
-    #      list object allows for setting list start, page size, list content, 
+    #      list object allows for setting list start, page size, list content,
     #      whether to redisplay the list, and maybe other things
-    morestring,endstring,startstring,backstring = 
+    morestring,endstring,startstring,backstring =
         %w[more end start back].map{|w| $COMMAND_SIG + w}
     c1 = Hash.new
     commands.each do |k,v|
@@ -214,20 +214,20 @@ def list_ids(entries, prompt, start=0, nentries=nil, commands=Hash.new)
         end
     end
 
-    if pos.nil? 
-        return nil 
+    if pos.nil?
+        return nil
     end
 
     pos = pos.to_i
-    if pos < 0 
-        entries.length + pos 
-    else 
-        pos 
+    if pos < 0
+        entries.length + pos
+    else
+        pos
     end
 end
 
 def xmms2_ids_to_display_list_strings(ids, fields=%w[artist title url duration])
-    ids.map do |id| 
+    ids.map do |id|
         my_info = extract_medialib_info(id, *fields)
         artist_part = my_info[:artist]
         some_title = (my_info[:title] or File.basename(my_info[:url]))
@@ -238,7 +238,7 @@ end
 
 def decode_xmms2_url (url)
     URI.decode_www_form_component(url)
-    #echo "$(perl -MURI::Escape -e 'print uri_unescape($ARGV[0]);' "$url")" 
+    #echo "$(perl -MURI::Escape -e 'print uri_unescape($ARGV[0]);' "$url")"
 end
 
 def get_usertags(id)
@@ -275,7 +275,7 @@ def tag_menu(ids, previous_tags)
 
     tag = my_dmenu(tag_list, "Add/delete a tag")
     if (!tag.empty?)
-        Thread.new do 
+        Thread.new do
             if (tag[0] == "!")
                 ids.each do |id|
                     untag_track(id, tag[1..-1])
@@ -321,7 +321,7 @@ end
 # The idea of this is that if I like a song around the middle of the track, I think it's a
 # really good song and it's probably new since I had to listen halfway through to decide
 # I liked it. I also consider that there may be an over-eagerness in my reaction early in
-# a track, so I penalize that. Lastly, for me, if I like the track near the end, I'm only 
+# a track, so I penalize that. Lastly, for me, if I like the track near the end, I'm only
 # sort-of listening to it or only like it enough to appreciate it as a whole, but can't
 # say much for it in parts.
 #
@@ -332,7 +332,7 @@ def track_appreciation_factor(playtime, track_duration)
     l
 end
 
-$commands=%w<toggle list +fav +fav-album 
+$commands=%w<toggle list +fav +fav-album
 tag tag-album prev next stop repeat-playlist
 info change-playlist remove-playlist show-playlist
 clear edit-metadata remove shuffle search
@@ -359,9 +359,12 @@ rescue Xmms::Client::ClientError => e
     $stderr.puts "Connected."
 end
 
-$pl = $xc.playlist
+def current_pl
+    $xc.playlist
+end
+
 $xc.broadcast_playlist_loaded.notifier do |res|
-    $pl = $xc.playlist
+    current_pl = $xc.playlist
     true
 end
 
@@ -387,14 +390,14 @@ while (true) do
         end
         break
     when "info"
-        entries = $pl.entries.wait.value
+        entries = current_pl.entries.wait.value
         if not entries.nil?
             pos = pl_list(nil,nil,"Track Info:")
             id = entries[pos]
             info = extract_medialib_info(id, *%w<artist title album tracknr favorite timesplayed url date duration laststarted added usertags comment>)
-            info = Hash[info.map { |k,v| 
+            info = Hash[info.map { |k,v|
                 k = k.to_s
-                if %w<duration>.include?(k) 
+                if %w<duration>.include?(k)
                     v = [v.to_i.ms_to_time_string, v]
                 elsif %w<laststarted added lmod>.include?(k)
                     v = [Time.at(v.to_i).strftime("%F"), v]
@@ -417,7 +420,7 @@ while (true) do
                     else
                         value = values[0]
                     end
-                    operation = my_dmenu(%w<copy back>, value) 
+                    operation = my_dmenu(%w<copy back>, value)
                     case operation
                     when "copy"
                         `echo '#{value}' | xsel --clipboard -i`
@@ -443,11 +446,11 @@ while (true) do
         d = $xc.coll_query_ids(coll).wait.value
         def add(ids)
             ids.each do |z|
-                $pl.add_entry(z).wait
+                current_pl.add_entry(z).wait
             end
         end
 
-        def new_playlist(ids) 
+        def new_playlist(ids)
             pl_coll = Xmms::Collection.new(Xmms::Collection::TYPE_IDLIST)
             pl_coll.idlist = ids
             playlist_title = my_dmenu([], "Playlist name")
@@ -455,7 +458,7 @@ while (true) do
                 $xc.coll_save(pl_coll, playlist_title, Xmms::Collection::NS_PLAYLISTS)
             end
         end
-        cs = Hash.new 
+        cs = Hash.new
         cs["add"] = proc { |k| add(k) } # thunk it!
         cs["new-playlist"] = proc { |k| new_playlist(k) } # thunk it!
         pos = list_ids(d, prompt="Results", start=0, nentries=$LIST_ENTRIES_PER_PAGE, commands=cs)
@@ -478,7 +481,7 @@ while (true) do
             if pos.nil?
                 break
             else
-                $pl.remove_entry(pos).wait
+                current_pl.remove_entry(pos).wait
             end
         end
         break
@@ -554,7 +557,7 @@ while (true) do
         end
         break
     when "shuffle"
-        $pl.shuffle.wait
+        current_pl.shuffle.wait
         break
     when "shutdown"
         `xmms2 server shutdown`
@@ -563,7 +566,7 @@ while (true) do
         print $xc.playback_playtime.wait.value
         id = $xc.playback_current_id.wait.value
         info = extract_medialib_info(id, :duration)
-        dur = info[:duration].to_i 
+        dur = info[:duration].to_i
         interval_size = dur / 10
         times = []
         times << ["start",  0]

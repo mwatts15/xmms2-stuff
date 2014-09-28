@@ -87,7 +87,10 @@ while true do
     begin
         if not ($info.nil? or p.nil?)
             d = $info[:duration].to_i
-            r = [$string.length, (p * $string.length) / d].min
+            # The '- 1' is to prevent us from putting the </fc> on 
+            # a new line and mucking up xmobar's line-based parse
+            r = [$string.length - 1, (p * $string.length) / d].min
+            r = [0, r].max
             print String.new($string).insert(r, "</fc>").insert(0,"<fc=#8aadb9>")
         end
     rescue Xmms::Client::ClientError => e

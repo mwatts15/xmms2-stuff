@@ -514,10 +514,11 @@ while (true) do
         break
     when "tag-album"
         begin
+            id = $xc.playback_current_id.wait.value
             album_ids = get_album_ids(id)
             while tag_menu(album_ids, [])
             end
-        catch e
+        rescue => e
             puts e
         end
 

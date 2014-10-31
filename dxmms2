@@ -434,16 +434,11 @@ while (true) do
         end
         break
     when "search"
-        fields = ["artist", "title", "genre", "album"]
+        fields = ["artist", "title", "genre", "album", "date", "url"]
         choice = my_dmenu(fields, prompt="Field")
         if choice.empty?
             break
         end
-
-        # XXX: Save and display past searches
-        search_string = my_dmenu([],prompt="Search string")
-        coll = match_collection(choice, search_string)
-        d = $xc.coll_query_ids(coll).wait.value
         def add(ids)
             ids.each do |z|
                 current_pl.add_entry(z).wait
@@ -458,6 +453,11 @@ while (true) do
                 $xc.coll_save(pl_coll, playlist_title, Xmms::Collection::NS_PLAYLISTS)
             end
         end
+
+        # XXX: Save and display past searches
+        search_string = my_dmenu([],prompt="Search string")
+        coll = match_collection(choice, search_string)
+        d = $xc.coll_query_ids(coll,"tracknr").wait.value
         cs = Hash.new
         cs["add"] = proc { |k| add(k) } # thunk it!
         cs["new-playlist"] = proc { |k| new_playlist(k) } # thunk it!

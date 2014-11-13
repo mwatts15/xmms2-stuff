@@ -1,5 +1,5 @@
 #!/usr/bin/env ruby
-
+# encoding: utf-8
 require 'xmmsclient'
 require 'prelude'
 require 'socket'
@@ -10,12 +10,16 @@ $LOG_FILE = nil
 
 $xc = Xmms::Client.new("xmms2-stirg")
 $CONNECTED=false
+$paused = false
+$repeat = "off"
+$stopped = false
+
 while not $CONNECTED
     begin
         $xc.connect
         $CONNECTED=true
         $LOG_FILE = File.open($LOG_PATH,"w")
-        $xc.on_disconnect do 
+        $xc.on_disconnect do
             $LOG_FILE.print "Server died. Getting the hell out of Dodge.\n"
             exit
         end
@@ -64,6 +68,32 @@ $xc.broadcast_playback_current_id.notifier do |res|
     true
 end
 
+$xc.broadcast_config_value_changed.notifier do |res|
+    if res['playlist.repeat_all'.to_sym] == "1"
+        $repeat = "playlist"
+    elsif res['playlist.repeat_one'.to_sym] == "1"
+        $repeat = "track"
+    else
+        $repeat = "off"
+    end
+    get_string
+    true
+end
+
+$xc.broadcast_playback_status.notifier do |res|
+    if (res == 1)
+        $paused = false
+        $stopped = false
+    elsif (res == 2)
+        $paused = true
+    else
+        $stopped = true
+        $paused = true
+    end
+    get_string
+    true
+end
+
 #get_string
 
 if not(File.exists?($PIPE_PATH) and File.pipe?($PIPE_PATH))
@@ -76,22 +106,40 @@ end
 
 $stdout = File.open($PIPE_PATH,"w")
 $stderr = $LOG_FILE
-
+$tiddle = true
 while true do
     begin
         p = $xc.playback_playtime.wait.value
     rescue TypeError => e
         p = $xc.playback_playtime.wait.value
     end
+    if $stopped
+        p = 0
+    end
 
     begin
-        if not ($info.nil? or p.nil?)
+        if not($info.nil? or p.nil?)
             d = $info[:duration].to_i
-            # The '- 1' is to prevent us from putting the </fc> on 
+            # The '- 1' is to prevent us from putting the </fc> on
             # a new line and mucking up xmobar's line-based parse
             r = [$string.length - 1, (p * $string.length) / d].min
             r = [0, r].max
-            print String.new($string).insert(r, "</fc>").insert(0,"<fc=#8aadb9>")
+            start_symbol = if $paused
+                               "*"
+                           elsif $tiddle
+                               "/"
+                           else
+                               "\\"
+                           end
+            repeat_symbol = if $repeat == "track"
+                                "↻1"
+                            elsif $repeat == "playlist"
+                                "↻"
+                            else
+                                ""
+                            end
+
+            print start_symbol + " " + repeat_symbol + String.new($string).insert(r, "</fc>").insert(0,"<fc=#8aadb9>")
         end
     rescue Xmms::Client::ClientError => e
         $LOG_FILE.print "Server died. Dying.\n"
@@ -101,5 +149,6 @@ while true do
         raise e
     end
     $stdout.flush
+    $tiddle = !$tiddle
     sleep 1
 end

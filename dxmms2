@@ -457,7 +457,7 @@ while (true) do
         # XXX: Save and display past searches
         search_string = my_dmenu([],prompt="Search string")
         coll = match_collection(choice, search_string)
-        d = $xc.coll_query_ids(coll,"tracknr").wait.value
+        d = $xc.coll_query_ids(coll,"artist,album,tracknr").wait.value
         cs = Hash.new
         cs["add"] = proc { |k| add(k) } # thunk it!
         cs["new-playlist"] = proc { |k| new_playlist(k) } # thunk it!

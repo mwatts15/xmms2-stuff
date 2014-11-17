@@ -238,7 +238,6 @@ end
 
 def decode_xmms2_url (url)
     URI.decode_www_form_component(url)
-    #echo "$(perl -MURI::Escape -e 'print uri_unescape($ARGV[0]);' "$url")"
 end
 
 def get_usertags(id)
@@ -303,11 +302,34 @@ def tag_menu(ids, previous_tags)
     end
 end
 
-def get_album_ids(id)
-    album_name = extract_medialib_info(id, :album)[:album]
-    album_coll = match_collection('album', album_name)
+def get_album_info(id, *fields)
+    album_coll = get_album_collection(id)
+    data = $xc.coll_query_info(album_coll, fields).wait.value
+    data.map do |infos|
+        res = Hash.new
+        fields = fields.map! {|f| f.to_sym }
+        fields.each do |field|
+            values = infos[field]
+            if not values.nil?
+                my_value = values # actual value from the top source [0]
+                if field == :url
+                    my_value = decode_xmms2_url(my_value)
+                end
+                res[field] = my_value.to_s.force_encoding("utf-8")
+            end
+        end
+        res
+    end
+end
 
+def get_album_ids(id)
+    album_coll = get_album_collection(id)
     $xc.coll_query_ids(album_coll).wait.value
+end
+
+def get_album_collection(id)
+    album_name = extract_medialib_info(id, :album)[:album]
+    match_collection('album', album_name)
 end
 
 def match_collection(field, pattern)
@@ -335,7 +357,7 @@ end
 $commands=%w<toggle list +fav +fav-album
 tag tag-album prev next stop repeat-playlist
 info change-playlist remove-playlist show-playlist
-clear edit-metadata remove shuffle search
+clear edit-album-metadata edit-metadata remove shuffle search
 repeat-track repeat-off shutdown seek>
 
 
@@ -512,6 +534,29 @@ while (true) do
         end
 
         break
+    when "edit-metadata"
+        id = $xc.playback_current_id.wait.value
+        url = extract_medialib_info(id, "url")[:url]
+        prefix = "file://"
+        plen = prefix.length
+        if url.start_with?(prefix)
+            url = url[plen..-1]
+            `picard "#{url}"`
+        end
+        break
+    when "edit-album-metadata"
+        id = $xc.playback_current_id.wait.value
+        urls = get_album_info(id, "url").map{|x| x[:url]}
+        prefix = "file://"
+        plen = prefix.length
+        urls = urls.select do |x|
+            x.start_with?(prefix)
+        end.map do |x|
+            x[plen..-1]
+        end
+        files = urls.map{|x|"\"#{x}\""}.join(" ")
+        `picard #{ files }`
+        break
     when "tag-album"
         begin
             id = $xc.playback_current_id.wait.value
@@ -547,21 +592,21 @@ while (true) do
     when %r{repeat-(off|track|playlist)}
         case command.split(%r{-})[1]
         when "off"
-            `xmms2 server config playlist.repeat_one 0`
-            `xmms2 server config playlist.repeat_all 0`
+            $xc.config_set_value('playlist.repeat_one', 0).wait
+            $xc.config_set_value('playlist.repeat_all', 0).wait
         when "track"
-            `xmms2 server config playlist.repeat_one 1`
-            `xmms2 server config playlist.repeat_all 0`
+            $xc.config_set_value('playlist.repeat_one', 1).wait
+            $xc.config_set_value('playlist.repeat_all', 0).wait
         when "playlist"
-            `xmms2 server config playlist.repeat_one 0`
-            `xmms2 server config playlist.repeat_all 1`
+            $xc.config_set_value('playlist.repeat_one', 0).wait
+            $xc.config_set_value('playlist.repeat_all', 1).wait
         end
         break
     when "shuffle"
         current_pl.shuffle.wait
         break
     when "shutdown"
-        `xmms2 server shutdown`
+        $xc.quit.wait
         break
     when "seek"
         print $xc.playback_playtime.wait.value

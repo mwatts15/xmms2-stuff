@@ -442,10 +442,13 @@ while (true) do
                     else
                         value = values[0]
                     end
-                    operation = my_dmenu(%w<copy back>, value)
+                    operation = my_dmenu(%w<copy full-display back>, value)
                     case operation
                     when "copy"
                         `echo '#{value}' | xsel --clipboard -i`
+                        break
+                    when "full-display"
+                        `echo '#{value}' | zenity --text-info`
                         break
                     when "back"
                     else
@@ -592,14 +595,14 @@ while (true) do
     when %r{repeat-(off|track|playlist)}
         case command.split(%r{-})[1]
         when "off"
-            $xc.config_set_value('playlist.repeat_one', 0).wait
-            $xc.config_set_value('playlist.repeat_all', 0).wait
+            $xc.config_set_value('playlist.repeat_one', "0").wait
+            $xc.config_set_value('playlist.repeat_all', "0").wait
         when "track"
-            $xc.config_set_value('playlist.repeat_one', 1).wait
-            $xc.config_set_value('playlist.repeat_all', 0).wait
+            $xc.config_set_value('playlist.repeat_one', "1").wait
+            $xc.config_set_value('playlist.repeat_all', "0").wait
         when "playlist"
-            $xc.config_set_value('playlist.repeat_one', 0).wait
-            $xc.config_set_value('playlist.repeat_all', 1).wait
+            $xc.config_set_value('playlist.repeat_one', "0").wait
+            $xc.config_set_value('playlist.repeat_all', "1").wait
         end
         break
     when "shuffle"

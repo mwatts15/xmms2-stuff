@@ -81,6 +81,19 @@ def get_repeat_status
     end
 end
 
+def decode_playback_status(stat_code)
+    if (stat_code == 1)
+        paused = false
+        stopped = false
+    elsif (stat_code == 2)
+        paused = true
+    else
+        stopped = true
+        paused = true
+    end
+    return paused, stopped
+end
+
 $xc.broadcast_playback_current_id.notifier do |res|
     $string = get_string
     true
@@ -92,15 +105,7 @@ $xc.broadcast_config_value_changed.notifier do |res|
 end
 
 $xc.broadcast_playback_status.notifier do |res|
-    if (res == 1)
-        $paused = false
-        $stopped = false
-    elsif (res == 2)
-        $paused = true
-    else
-        $stopped = true
-        $paused = true
-    end
+    $paused, $stopped = decode_playback_status(res)
     update
     true
 end
@@ -168,6 +173,7 @@ $stdout = File.open($PIPE_PATH,"w")
 $stderr = $LOG_FILE
 $string = get_string
 $repeat = get_repeat_status
+$paused, $stopped = decode_playback_status($xc.playback_status.wait.value)
 while true do
     update
     $tiddle = $tiddle + 1

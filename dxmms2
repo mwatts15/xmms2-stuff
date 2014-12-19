@@ -172,15 +172,15 @@ def list_ids(entries, prompt, start=0, nentries=nil, commands=Hash.new)
         nw = list_end.to_s.length
         i = list_start
 
-        if not start_clamped
-            items << backstring
-            items << startstring
-        end
-
         items += xmms2_ids_to_display_list_strings(entries[list_start..list_end]).map do |string|
             string = "#{i.to_s.rjust(nw)}. #{string}"
             i += 1
             string
+        end
+
+        if not start_clamped
+            items << backstring
+            items << startstring
         end
 
         if not end_clamped
@@ -415,6 +415,9 @@ while (true) do
         entries = current_pl.entries.wait.value
         if not entries.nil?
             pos = pl_list(nil,nil,"Track Info:")
+            if pos.nil?
+                break
+            end
             id = entries[pos]
             info = extract_medialib_info(id, *%w<artist title album tracknr favorite timesplayed url date duration laststarted added usertags comment>)
             info = Hash[info.map { |k,v|

@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
 # encoding: utf-8
-require 'xmmsclient'
+require 'xmms2_utils'
 require 'prelude'
 require 'socket'
 
@@ -8,49 +8,17 @@ $PIPE_PATH = "/tmp/#{ENV["USER"]}-xmms2-string-ipc-pipe"
 $LOG_PATH = "#{ENV["HOME"]}/.config/xmms2/xmms2-string.log"
 $LOG_FILE = nil
 
-$xc = Xmms::Client.new("xmms2-stirg")
-$CONNECTED=false
+$xc = Xmms::client("xmms2-stirg")
+$LOG_FILE = File.open($LOG_PATH,"w")
+$xc.on_disconnect do
+    $LOG_FILE.print "Server died. Getting the hell out of Dodge.\n"
+    exit
+end
+
 $paused = false
 $repeat = "off"
 $stopped = false
 $tiddle = 0
-
-while not $CONNECTED
-    begin
-        $xc.connect
-        $CONNECTED=true
-        $LOG_FILE = File.open($LOG_PATH,"w")
-        $xc.on_disconnect do
-            $LOG_FILE.print "Server died. Getting the hell out of Dodge.\n"
-            exit
-        end
-    rescue Xmms::Client::ClientError => e
-        $stderr.puts "Waiting for connect..."
-        sleep 1
-    end
-end
-
-def extract_medialib_info(id, *fields)
-    infos = $xc.medialib_get_info(id).wait.value
-    res = Hash.new
-
-    fields = fields.map! {|f| f.to_sym }
-    fields.each do |field|
-        values = infos[field]
-        if not values.nil?
-            my_value = values.first[1] # actual value from the top source [0]
-            if field == :url
-                my_value = decode_xmms2_url(my_value)
-            end
-            res[field] = my_value.to_s.force_encoding("utf-8")
-        end
-    end
-    res
-end
-
-def decode_xmms2_url (url)
-    URI.decode_www_form_component(url)
-end
 
 $fields = [:title, :artist, :album]
 
@@ -59,7 +27,7 @@ $string = ""
 
 def get_string(sep="::",undef_string="UNDEF")
     $current_id = $xc.playback_current_id.wait.value
-    $info = extract_medialib_info($current_id, *$fields, :duration)
+    $info = $xc.extract_medialib_info($current_id, *$fields, :duration)
     info = $fields.map{|f| if $info[f] == nil then undef_string else $info[f] end}
     max_width = info.map{|k| k.real_length}.max
     begin

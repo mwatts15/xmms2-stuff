@@ -1,5 +1,6 @@
 #!/usr/bin/env ruby
-require 'xmmsclient'
+#require 'xmmsclient'
+require 'xmms2_utils'
 require 'uri'
 require 'socket'
 ##########################
@@ -99,25 +100,6 @@ def my_dmenu (entries, prompt='dxmms2', height=entries.count, width=$SCREEN_WIDT
         res = io.gets
     end
     res.to_s.chomp
-end
-
-# returns a hash of the passed in fields
-# with the top values for the fields
-def extract_medialib_info(id, *fields)
-    infos = $xc.medialib_get_info(id).wait.value
-    res = Hash.new
-    fields = fields.map! {|f| f.to_sym }
-    fields.each do |field|
-        values = infos[field]
-        if not values.nil?
-            my_value = values.first[1] # actual value from the top source [0]
-            if field == :url
-                my_value = decode_xmms2_url(my_value)
-            end
-            res[field] = my_value.to_s.force_encoding("utf-8")
-        end
-    end
-    res
 end
 
 def playlists_prompt(&call_back)
@@ -228,7 +210,7 @@ end
 
 def xmms2_ids_to_display_list_strings(ids, fields=%w[artist title url duration])
     ids.map do |id|
-        my_info = extract_medialib_info(id, *fields)
+        my_info = $xc.extract_medialib_info(id, *fields)
         artist_part = my_info[:artist]
         some_title = (my_info[:title] or File.basename(my_info[:url]))
         duration = my_info[:duration].to_i.ms_to_time_string
@@ -236,12 +218,8 @@ def xmms2_ids_to_display_list_strings(ids, fields=%w[artist title url duration])
     end
 end
 
-def decode_xmms2_url (url)
-    URI.decode_www_form_component(url)
-end
-
 def get_usertags(id)
-    info = extract_medialib_info(id, :usertags)
+    info = $xc.extract_medialib_info(id, :usertags)
     if info.has_key?(:usertags)
         info[:usertags].lines.to_a
     else
@@ -313,7 +291,7 @@ def get_album_info(id, *fields)
             if not values.nil?
                 my_value = values # actual value from the top source [0]
                 if field == :url
-                    my_value = decode_xmms2_url(my_value)
+                    my_value = Xmms::decode_xmms2_url(my_value)
                 end
                 res[field] = my_value.to_s.force_encoding("utf-8")
             end
@@ -328,7 +306,7 @@ def get_album_ids(id)
 end
 
 def get_album_collection(id)
-    album_name = extract_medialib_info(id, :album)[:album]
+    album_name = $xc.extract_medialib_info(id, :album)[:album]
     match_collection('album', album_name)
 end
 
@@ -361,25 +339,7 @@ clear edit-album-metadata edit-metadata remove shuffle search
 repeat-track repeat-off shutdown seek>
 
 
-$xc = Xmms::Client.new("dxmms2")
-begin
-    $xc.connect()
-rescue Xmms::Client::ClientError => e
-    $stderr.puts e
-    `xmms2-launcher`
-    ntries = 1
-    while $? != 0
-        if ntries > 4
-            exit "Can't start xmms2d. Exiting."
-        end
-        $stderr.puts "Coludn't start the daemon, trying again..."
-        sleep 3
-        `xmms2-launcher -vvvv`
-        ntries += 1
-    end
-    $xc.connect()
-    $stderr.puts "Connected."
-end
+$xc = Xmms::client("dxmms2")
 
 def current_pl
     $xc.playlist
@@ -419,7 +379,7 @@ while (true) do
                 break
             end
             id = entries[pos]
-            info = extract_medialib_info(id, *%w<artist title album tracknr favorite timesplayed url date duration laststarted added usertags comment>)
+            info = $xc.extract_medialib_info(id, *%w<artist title album tracknr favorite timesplayed url date duration laststarted added usertags comment>)
             info = Hash[info.map { |k,v|
                 k = k.to_s
                 if %w<duration>.include?(k)
@@ -517,7 +477,7 @@ while (true) do
         begin
             id = $xc.playback_current_id.wait.value
             p = $xc.playback_playtime.wait.value
-            data = extract_medialib_info(id, :favorite, :duration)
+            data = $xc.extract_medialib_info(id, :favorite, :duration)
             old_favorite = data[:favorite].to_f
             duration = data[:duration].to_i
             appreciation = track_appreciation_factor(p, duration)
@@ -527,7 +487,7 @@ while (true) do
     when "+fav-album"
         id = $xc.playback_current_id.wait.value
         get_album_ids(id).each do |al_id|
-            old_favorite = extract_medialib_info(al_id, :favorite)[:favorite].to_f
+            old_favorite = $xc.extract_medialib_info(al_id, :favorite)[:favorite].to_f
             $xc.medialib_entry_property_set(al_id, :favorite, old_favorite+1).wait
         end
         break
@@ -542,7 +502,7 @@ while (true) do
         break
     when "edit-metadata"
         id = $xc.playback_current_id.wait.value
-        url = extract_medialib_info(id, "url")[:url]
+        url = $xc.extract_medialib_info(id, "url")[:url]
         prefix = "file://"
         plen = prefix.length
         if url.start_with?(prefix)
@@ -609,7 +569,8 @@ while (true) do
         end
         break
     when "shuffle"
-        current_pl.shuffle.wait
+        $xc.shuffle_by(current_pl, :artist)
+        #current_pl.shuffle.wait
         break
     when "shutdown"
         $xc.quit.wait
@@ -617,7 +578,7 @@ while (true) do
     when "seek"
         print $xc.playback_playtime.wait.value
         id = $xc.playback_current_id.wait.value
-        info = extract_medialib_info(id, :duration)
+        info = $xc.extract_medialib_info(id, :duration)
         dur = info[:duration].to_i
         interval_size = dur / 10
         times = []

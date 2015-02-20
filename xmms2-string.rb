@@ -8,6 +8,8 @@ $PIPE_PATH = "/tmp/#{ENV["USER"]}-xmms2-string-ipc-pipe"
 $LOG_PATH = "#{ENV["HOME"]}/.config/xmms2/xmms2-string.log"
 $LOG_FILE = nil
 $DISCONNECTED = false
+$ACTIVE_COLOR = "#8aadb9"
+$STOPPED_COLOR  = "#ff0000"
 $xc = Xmms::client("xmms2-stirg")
 $LOG_FILE = File.open($LOG_PATH,"w")
 $xc.on_disconnect do
@@ -99,11 +101,11 @@ def get_xmobar_string(tiddle, playtime, track_info_string)
             play_anim = "-\\|/"
             play_anim_count = tiddle % play_anim.length
             start_symbol = if $stopped
-                               "<fc=#ff0000>*</fc>"
+                               "<fc=#{$STOPPED_COLOR}>*</fc>"
                            elsif $paused
                                "*"
                            else
-                               "<fc=#8aadb9>"+play_anim[play_anim_count] +"</fc>"
+                               "<fc=#{$ACTIVE_COLOR}>"+play_anim[play_anim_count] +"</fc>"
                            end
             repeat_symbol = if $repeat == "track"
                                 "T"
@@ -112,7 +114,7 @@ def get_xmobar_string(tiddle, playtime, track_info_string)
                             else
                                 "-"
                             end
-            str = start_symbol + repeat_symbol + " " + String.new(track_info_string).insert(r, "</fc>").insert(0,"<fc=#8aadb9>")
+            str = start_symbol + repeat_symbol + " " + String.new(track_info_string).insert(r, "</fc>").insert(0,"<fc=#{$ACTIVE_COLOR}>")
         end
     end
     str

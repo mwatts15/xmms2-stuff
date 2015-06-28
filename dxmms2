@@ -367,7 +367,19 @@ def play_new_track(xc, pos=false)
     xc.playback_start.wait
 end
 
-while (true) do
+def edit_metadata(urls)
+    prefix = "file://"
+    plen = prefix.length
+    urls = urls.select do |x|
+        x.start_with?(prefix)
+    end.map do |x|
+        x[plen..-1]
+    end
+    files = urls.map{|x|"\"#{x}\""}.join(" ")
+    `picard #{ files }`
+end
+
+while true do
     command = my_dmenu($commands).chomp
     case command
         # NOTE: The *break statements* in here are for the *while loop*
@@ -437,18 +449,26 @@ while (true) do
             end
         end
 
-        def new_playlist(ids)
+        def new_playlist(title, ids)
             pl_coll = Xmms::Collection.new(Xmms::Collection::TYPE_IDLIST)
             pl_coll.idlist = ids
-            playlist_title = my_dmenu([], "Playlist name")
-            if !playlist_title.empty?
-                $xc.coll_save(pl_coll, playlist_title, Xmms::Collection::NS_PLAYLISTS)
+            if !title.empty?
+                $xc.coll_save(pl_coll, title, Xmms::Collection::NS_PLAYLISTS)
             end
+        end
+
+        def new_playlist(ids)
+            new_playlist(my_dmenu([], "Playlist name"), ids)
+        end
+
+        def edit_ids_metadata(ids)
+            edit_metadata(ids.map{ |id| $xc.extract_medialib_info(id, "url")[:url] })
         end
 
         current_collection = Xmms::Collection.universe # TODO: Support searching multiple fields as in xmmsfs
         cs = {
             'add' => proc { |k| add(k) },
+            'edit-metadata' => proc { |k| edit_ids_metadata(k) },
             'new-playlist' => proc { |k| new_playlist(k) }
         }
         while true
@@ -457,7 +477,7 @@ while (true) do
                 break
             end
             field_sym = field.to_sym
-            options = Set.new(get_collection_info(current_collection, field).map{|x| x.fetch(field_sym, "UNDEF")}).to_a
+            options = Set.new(get_collection_info(current_collection, field).map{|x| x.fetch(field_sym, "UNDEF")}).to_a.sort
 
             # XXX: Save and display past searches
             search_string = my_dmenu(options, prompt="Search string")
@@ -468,6 +488,7 @@ while (true) do
             pos = list_ids(d, prompt="Results", start=0, nentries=$LIST_ENTRIES_PER_PAGE, commands=cs)
 
             # Make the playlist collection
+
             pl_coll = Xmms::Collection.new(Xmms::Collection::TYPE_IDLIST)
             pl_coll.idlist = d
             $xc.coll_save(pl_coll, 'search-result-list', Xmms::Collection::NS_PLAYLISTS)
@@ -523,25 +544,12 @@ while (true) do
     when "edit-metadata"
         id = $xc.playback_current_id.wait.value
         url = $xc.extract_medialib_info(id, "url")[:url]
-        prefix = "file://"
-        plen = prefix.length
-        if url.start_with?(prefix)
-            url = url[plen..-1]
-            `picard "#{url}"`
-        end
+        edit_metadata([url])
         break
     when "edit-album-metadata"
         id = $xc.playback_current_id.wait.value
         urls = get_album_info(id, "url").map{|x| x[:url]}
-        prefix = "file://"
-        plen = prefix.length
-        urls = urls.select do |x|
-            x.start_with?(prefix)
-        end.map do |x|
-            x[plen..-1]
-        end
-        files = urls.map{|x|"\"#{x}\""}.join(" ")
-        `picard #{ files }`
+        edit_metadata(urls)
         break
     when "tag-album"
         begin

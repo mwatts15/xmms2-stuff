@@ -3,6 +3,7 @@
 require 'xmms2_utils'
 require 'uri'
 require 'socket'
+require 'set'
 ##########################
 # simple xmms2 script    #
 # for dmenu              #
@@ -281,8 +282,11 @@ def tag_menu(ids, previous_tags)
 end
 
 def get_album_info(id, *fields)
-    album_coll = get_album_collection(id)
-    data = $xc.coll_query_info(album_coll, fields).wait.value
+    get_collection_info(get_album_collection(id), *fields)
+end
+
+def get_collection_info(coll, *fields)
+    data = $xc.coll_query_info(coll, fields).wait.value
     data.map do |infos|
         res = Hash.new
         fields = fields.map! {|f| f.to_sym }
@@ -310,9 +314,13 @@ def get_album_collection(id)
     match_collection('album', album_name)
 end
 
-def match_collection(field, pattern)
+def match_collection(field, pattern, base_coll=nil)
     coll = Xmms::Collection.new(Xmms::Collection::TYPE_MATCH)
-    coll.operands << Xmms::Collection.universe
+    if !coll.nil?
+        coll.operands << base_coll
+    else
+        coll.operands << Xmms::Collection.universe
+    end
     coll.attributes["field"] = field
     coll.attributes["value"] = pattern
     coll
@@ -423,10 +431,6 @@ while (true) do
         break
     when "search"
         fields = ["artist", "title", "genre", "album", "date", "url"]
-        choice = my_dmenu(fields, prompt="Field")
-        if choice.empty?
-            break
-        end
         def add(ids)
             ids.each do |z|
                 current_pl.add_entry(z).wait
@@ -442,26 +446,42 @@ while (true) do
             end
         end
 
-        # XXX: Save and display past searches
-        search_string = my_dmenu([],prompt="Search string")
-        coll = match_collection(choice, search_string)
-        d = $xc.coll_query_ids(coll,"artist,album,tracknr").wait.value
-        cs = Hash.new
-        cs["add"] = proc { |k| add(k) } # thunk it!
-        cs["new-playlist"] = proc { |k| new_playlist(k) } # thunk it!
-        pos = list_ids(d, prompt="Results", start=0, nentries=$LIST_ENTRIES_PER_PAGE, commands=cs)
+        current_collection = Xmms::Collection.universe # TODO: Support searching multiple fields as in xmmsfs
+        cs = {
+            'add' => proc { |k| add(k) },
+            'new-playlist' => proc { |k| new_playlist(k) }
+        }
+        while true
+            field = my_dmenu(fields, prompt="Field")
+            if field.empty?
+                break
+            end
+            field_sym = field.to_sym
+            options = Set.new(get_collection_info(current_collection, field).map{|x| x.fetch(field_sym, "UNDEF")}).to_a
 
-        # Make the playlist collection
-        pl_coll = Xmms::Collection.new(Xmms::Collection::TYPE_IDLIST)
-        pl_coll.idlist = d
-        $xc.coll_save(pl_coll, 'search-result-list', Xmms::Collection::NS_PLAYLISTS)
+            # XXX: Save and display past searches
+            search_string = my_dmenu(options, prompt="Search string")
+            search_string = "*#{search_string}*"
+            coll = match_collection(field, search_string, current_collection)
+            d = $xc.coll_query_ids(coll,"artist,album,tracknr").wait.value
 
-        # add the entry and load the playlist
-        if !pos.nil?
-            pl = $xc.playlist('search-result-list')
-            pl.load.wait
-            play_new_track($xc, pos)
+            pos = list_ids(d, prompt="Results", start=0, nentries=$LIST_ENTRIES_PER_PAGE, commands=cs)
+
+            # Make the playlist collection
+            pl_coll = Xmms::Collection.new(Xmms::Collection::TYPE_IDLIST)
+            pl_coll.idlist = d
+            $xc.coll_save(pl_coll, 'search-result-list', Xmms::Collection::NS_PLAYLISTS)
+
+            # add the entry and load the playlist
+            if !pos.nil?
+                pl = $xc.playlist('search-result-list')
+                pl.load.wait
+                play_new_track($xc, pos)
+                break
+            end
+            current_collection = coll
         end
+
         break
     when "remove"
         while true

@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
-#require 'xmmsclient'
 require 'xmms2_utils'
+require 'stringio'
 require 'uri'
 require 'socket'
 require 'set'
@@ -8,6 +8,8 @@ require 'set'
 # simple xmms2 script    #
 # for dmenu              #
 ##########################
+
+$xc = Xmms::client("dxmms2")
 
 $COMMAND_SIG = "@"
 # default configs {{{
@@ -30,6 +32,40 @@ class Integer
         seconds=(self % 60000) / 1000
         "%d:%02d" % [minutes, seconds]
     end
+end
+
+def encode_url(url, *args)
+    # adapted from the xmmsv lib because it's lacking in the ruby api
+    res = StringIO.new("")
+    hex = "0123456789abcdefg"
+    url.each_byte do |a|
+        good_char = ((((a) >= 'a'.ord) && ((a) <= 'z'.ord)) || \
+         (((a) >= 'A'.ord) && ((a) <= 'Z'.ord)) || \
+         (((a) >= '0'.ord) && ((a) <= '9'.ord)) || \
+         ((a) == ':'.ord) || \
+         ((a) == '/'.ord) || \
+         ((a) == '-'.ord) || \
+         ((a) == '.'.ord) || \
+         ((a) == '_'.ord))
+        if good_char
+            res << a.chr
+        elsif a == ' '.ord
+            res << '+'
+        else
+			res << '%';
+			res << hex[((a & 0xf0) >> 4)];
+			res << hex[(a & 0x0f)];
+        end
+    end
+    if !args.empty?
+        res << "?"
+    end
+    args.each do |key, value|
+        res[j] = (i == 0) ? '?' : '&';
+        res << key + "=" + value
+    end
+    puts(res.string)
+    res.string
 end
 
 def time_string_to_ms(str)
@@ -124,12 +160,16 @@ def pl_list(start=nil,nentries=nil,prompt="Track: ",plname=nil)
     list_ids(entries,prompt,start,nentries)
 end
 
-def list_ids(entries, prompt, start=0, nentries=nil, commands=Hash.new)
+def list_ids(entries, prompt, start=0, nentries=nil, commands=nil)
     # XXX: Create a list object to pass to user-supplied commands
     #      list object allows for setting list start, page size, list content,
     #      whether to redisplay the list, and maybe other things
     morestring,endstring,startstring,backstring =
         %w[more end start back].map{|w| $COMMAND_SIG + w}
+    if commands.nil?
+        commands = Hash.new
+    end
+
     c1 = Hash.new
     commands.each do |k,v|
         c1["@"+k] = v
@@ -293,7 +333,7 @@ def get_collection_info(coll, *fields)
         fields.each do |field|
             values = infos[field]
             if not values.nil?
-                my_value = values # actual value from the top source [0]
+                my_value = values
                 if field == :url
                     my_value = Xmms::decode_xmms2_url(my_value)
                 end
@@ -346,8 +386,6 @@ info change-playlist remove-playlist show-playlist
 clear edit-album-metadata edit-metadata remove shuffle search
 repeat-track repeat-off shutdown seek>
 
-
-$xc = Xmms::client("dxmms2")
 
 def current_pl
     $xc.playlist
@@ -453,11 +491,11 @@ while true do
             pl_coll = Xmms::Collection.new(Xmms::Collection::TYPE_IDLIST)
             pl_coll.idlist = ids
             if !title.empty?
-                $xc.coll_save(pl_coll, title, Xmms::Collection::NS_PLAYLISTS)
+                $xc.coll_save(pl_coll, title, Xmms::Collection::NS_PLAYLISTS).wait
             end
         end
 
-        def new_playlist(ids)
+        def new_playlist_prompt(ids)
             new_playlist(my_dmenu([], "Playlist name"), ids)
         end
 
@@ -466,11 +504,14 @@ while true do
         end
 
         current_collection = Xmms::Collection.universe # TODO: Support searching multiple fields as in xmmsfs
+        refine = false
         cs = {
             'add' => proc { |k| add(k) },
             'edit-metadata' => proc { |k| edit_ids_metadata(k) },
-            'new-playlist' => proc { |k| new_playlist(k) }
+            'new-playlist' => proc { |k| new_playlist_prompt(k) },
+            'refine' => proc { |k| refine=true }
         }
+
         while true
             field = my_dmenu(fields, prompt="Field")
             if field.empty?
@@ -481,17 +522,24 @@ while true do
 
             # XXX: Save and display past searches
             search_string = my_dmenu(options, prompt="Search string")
+            if !options.include?(search_string)
+                search_string.gsub!(" ","*")
+            elsif field == 'url'
+                search_string = encode_url(search_string)
+            end
+
+            if search_string.empty?
+                break
+            end
             search_string = "*#{search_string}*"
+            puts search_string
             coll = match_collection(field, search_string, current_collection)
             d = $xc.coll_query_ids(coll,"artist,album,tracknr").wait.value
 
             pos = list_ids(d, prompt="Results", start=0, nentries=$LIST_ENTRIES_PER_PAGE, commands=cs)
 
             # Make the playlist collection
-
-            pl_coll = Xmms::Collection.new(Xmms::Collection::TYPE_IDLIST)
-            pl_coll.idlist = d
-            $xc.coll_save(pl_coll, 'search-result-list', Xmms::Collection::NS_PLAYLISTS)
+            new_playlist('search-result-list', d)
 
             # add the entry and load the playlist
             if !pos.nil?
@@ -500,7 +548,12 @@ while true do
                 play_new_track($xc, pos)
                 break
             end
-            current_collection = coll
+
+            if refine
+                current_collection = coll
+            else
+                current_collection = Xmms::Collection.universe
+            end
         end
 
         break

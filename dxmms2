@@ -1,5 +1,6 @@
 #!/usr/bin/env ruby
 require 'xmms2_utils'
+require 'dmenu_util'
 require 'stringio'
 require 'uri'
 require 'socket'
@@ -59,7 +60,6 @@ class String
         # kanji characters. Used for formatting adjustment
         (self.bytes.count - self.length) / 2
     end
-
     def to_perc
         if self.ends_width("%")
             self.to_f / 100.0
@@ -83,26 +83,12 @@ class String
 end
 
 def my_dmenu (entries, prompt='dxmms2', height=entries.count, width=$SCREEN_WIDTH)
-    res = ""
     height = [height, 20].min
-    entries.collect! do |line|
-        l, r = line.split("|||")
-        #puts "width=" + width.to_s
-        r ? l.alignr(r.scrunch(width / $FONT_WIDTH), width) : l
-    end
-    cmdline = "dmenu -f -p \"#{prompt}\" -nf #{$FG_COLOR} \
-    -nb #{$BG_COLOR} \
-    -sb #{$SEL_BG_COLOR} \
-    -sf #{$SEL_FG_COLOR} \
-    -i -l #{height} \
-    -w #{width} \
-    -fn #{$FONT}"
-    IO.popen(cmdline, "w+") do |io|
-        io.print(entries.join("\n"))
-        io.close_write
-        res = io.gets
-    end
-    res.to_s.chomp
+    dmenu(entries, prompt, height, width,
+          $FG_COLOR,
+          $BG_COLOR,
+          $SEL_FG_COLOR,
+          $SEL_BG_COLOR)
 end
 
 def playlists_prompt(&call_back)
@@ -486,8 +472,10 @@ while true do
             field_sym = field.to_sym
             options = Set.new(get_collection_info(current_collection, field).map{|x| x.fetch(field_sym, "UNDEF")}).to_a.sort
 
+            prompt = "Search string"
             # XXX: Save and display past searches
-            search_string = my_dmenu(options, prompt="Search string")
+            search_string = my_dmenu(options, prompt)
+
             if !options.include?(search_string)
                 search_string.gsub!(" ","*")
             elsif field == 'url'

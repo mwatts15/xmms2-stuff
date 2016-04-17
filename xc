@@ -73,38 +73,38 @@ $receiver = Fiber.new do
     while true
         retry_count = 0
         begin
-        tag = $xce_connection.recv_nonblock(4).unpack("A4")[0]
-        length = $xce_connection.recv(4).unpack("L<")[0]
-        value = ""
-        if length > 0
-            value = $xce_connection.recv(length)
-        end
-
-        case tag
-        when "coll"
-            fields = %w[id artist title album]
-            collection = Marshal.restore(value)
-            table = [fields] + collection.map { |id| extract_medialib_info(id, fields) }
-            maxwidths = table.reduce(fields.map{ |f| f.length }) do |widths, row|
-                widths.zip(row.map{ |val| val.length }).map{|w| w.max}
-            end
-            table.each do |row|
-                puts row.zip(maxwidths).map { |pair|
-                    pair[0].ljust(pair[1])
-                }.join("|")[0,$screen_width]
+            tag = $xce_connection.recv_nonblock(4).unpack("A4")[0]
+            length = $xce_connection.recv(4).unpack("L<")[0]
+            value = ""
+            if length > 0
+                value = $xce_connection.recv(length)
             end
 
-        when "err"
-            puts "Server error: " + value
-        when "str"
-            value.each_line do |line|
-                puts "!- " + line
+            case tag
+            when "coll"
+                fields = %w[id artist title album]
+                collection = Marshal.restore(value)
+                table = [fields] + collection.map { |id| extract_medialib_info(id, fields) }
+                maxwidths = table.reduce(fields.map{ |f| f.length }) do |widths, row|
+                    widths.zip(row.map{ |val| val.length }).map{|w| w.max}
+                end
+                table.each do |row|
+                    puts row.zip(maxwidths).map { |pair|
+                        pair[0].ljust(pair[1])
+                    }.join("|")[0,$screen_width]
+                end
+
+            when "err"
+                puts "Server error: " + value
+            when "str"
+                value.each_line do |line|
+                    puts "!- " + line
+                end
+            when "ack"
+            else
+                puts "NONE OF THEM"
+                puts tag + value
             end
-        when "ack"
-        else
-            puts "NONE OF THEM"
-            puts tag + value
-        end
         rescue IO::WaitReadable 
             if (retry_count < 5)
                 retry_count += 1

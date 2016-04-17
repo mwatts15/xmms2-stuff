@@ -34,40 +34,6 @@ class Integer
     end
 end
 
-def encode_url(url, *args)
-    # adapted from the xmmsv lib because it's lacking in the ruby api
-    res = StringIO.new("")
-    hex = "0123456789abcdefg"
-    url.each_byte do |a|
-        good_char = ((((a) >= 'a'.ord) && ((a) <= 'z'.ord)) || \
-         (((a) >= 'A'.ord) && ((a) <= 'Z'.ord)) || \
-         (((a) >= '0'.ord) && ((a) <= '9'.ord)) || \
-         ((a) == ':'.ord) || \
-         ((a) == '/'.ord) || \
-         ((a) == '-'.ord) || \
-         ((a) == '.'.ord) || \
-         ((a) == '_'.ord))
-        if good_char
-            res << a.chr
-        elsif a == ' '.ord
-            res << '+'
-        else
-			res << '%';
-			res << hex[((a & 0xf0) >> 4)];
-			res << hex[(a & 0x0f)];
-        end
-    end
-    if !args.empty?
-        res << "?"
-    end
-    args.each do |key, value|
-        res[j] = (i == 0) ? '?' : '&';
-        res << key + "=" + value
-    end
-    puts(res.string)
-    res.string
-end
-
 def time_string_to_ms(str)
     res = 0
     s = 1
@@ -525,7 +491,7 @@ while true do
             if !options.include?(search_string)
                 search_string.gsub!(" ","*")
             elsif field == 'url'
-                search_string = encode_url(search_string)
+                search_string = Xmms::encode_url(search_string)
             end
 
             if search_string.empty?
@@ -535,7 +501,7 @@ while true do
             puts search_string
             coll = match_collection(field, search_string, current_collection)
             d = $xc.coll_query_ids(coll,"artist,album,tracknr").wait.value
-
+            d = d.reverse
             pos = list_ids(d, prompt="Results", start=0, nentries=$LIST_ENTRIES_PER_PAGE, commands=cs)
 
             # Make the playlist collection

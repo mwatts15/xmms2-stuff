@@ -121,6 +121,7 @@ def get_xmobar_string(tiddle, playtime, track_info_string)
 end
 
 def update
+    $stdout.puts "XMMS2"
     begin
         p = $xc.playback_playtime.wait.value
     rescue TypeError => e

@@ -2,13 +2,10 @@
 
 A set of tools for working with [XMMS2](http://xmms2.org).
 
-Setting the dmenu width in dxmms2 requires the patch provided in this repo. The 
-patch hasn't been tested--application may require manual effort.
-
 ## dxmms2
 *a dmenu shell for xmms2*
 
-  ![dxmms2 screenie](dxmms2.png)
+See the sub-directory
 
 ## xmms2-string.rb
 *a track-progression indicator for use in [xmobar](http://projects.haskell.org/xmobar/)*

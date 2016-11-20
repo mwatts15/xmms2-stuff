@@ -5,6 +5,14 @@ require 'stringio'
 require 'uri'
 require 'socket'
 require 'set'
+
+begin
+    require 'glib2'
+    $GLIB=true
+rescue
+    $GLIB=false
+end
+
 ##########################
 # simple xmms2 script    #
 # for dmenu              #
@@ -14,13 +22,22 @@ $xc = Xmms::client("dxmms2")
 
 $COMMAND_SIG = "@"
 # default configs {{{
-$SCREEN_WIDTH=600
-$FONT_WIDTH=9 #in pixels
-$BG_COLOR='"#000000"'
-$FG_COLOR='"#dc322f"'
-$SEL_BG_COLOR=$FG_COLOR
-$SEL_FG_COLOR=$BG_COLOR
-$FONT='"Sazanami Mincho":pixelsize=' + $FONT_WIDTH.to_s
+$SCREEN_WIDTH=Integer(ENV.fetch('DXMMS2_MENU_WIDTH', 600))
+$FONT_WIDTH=Integer(ENV.fetch('DXMMS2_FONT_WIDTH', 13)) #in pixels)
+$BG_COLOR=ENV.fetch('DMENU_BG_COLOR', '#000000')
+$FG_COLOR=ENV.fetch('DMENU_FG_COLOR', '#dc322f')
+$SEL_BG_COLOR=ENV.fetch('DMENU_SEL_BG_COLOR', $FG_COLOR)
+$SEL_FG_COLOR=ENV.fetch('DMENU_SEL_FG_COLOR', $BG_COLOR)
+if $GLIB
+    fallback = ENV.fetch('HOME', '/')
+    xdg_dir = GLib.get_user_special_dir(GLib::USER_DIRECTORY_MUSIC)
+    if !xdg_dir.nil?
+        fallback = xdg_dir
+    end
+    $MUSIC_DIRECTORY = ENV.fetch('DXMMS2_MUSIC_DIRECTORY', fallback)
+end
+
+$FONT=ENV.fetch('DMENU_FONT', 'Noto Sans Mono CJK JP Regular:pixelsize=10')
 $LIST_ENTRIES_PER_PAGE = 15
 $LINE_HEIGHT=10
 # }}}
@@ -52,7 +69,7 @@ class String
         force_encoding("utf-8")
     end
     def alignr(r, w)
-        str = self + r.rjust(Rational(w, $FONT_WIDTH) - r.kanji_off - self.kanji_off - self.length + Integer(w / $FONT_WIDTH) - 2, '.')
+        str = self + r.rjust(Rational(w, $FONT_WIDTH*2) - r.kanji_off - self.kanji_off - self.length + Integer(w / $FONT_WIDTH*2) - 2, '.')
         #puts str
         str
     end
@@ -90,6 +107,7 @@ def my_dmenu (entries, prompt='dxmms2', height=entries.count, width=$SCREEN_WIDT
           $BG_COLOR,
           $SEL_FG_COLOR,
           $SEL_BG_COLOR,
+          $FONT,
           $LINE_HEIGHT)
 end
 
@@ -126,7 +144,7 @@ def list_ids(entries, prompt, start=0, nentries=nil, commands=nil)
 
     c1 = Hash.new
     commands.each do |k,v|
-        c1["@"+k] = v
+        c1[$COMMAND_SIG + k] = v
     end
     listing=1
     nentries = (nentries.nil? ? $LIST_ENTRIES_PER_PAGE : nentries)
@@ -338,7 +356,7 @@ $commands=%w<toggle list +fav +fav-album
 tag tag-album prev next stop repeat-playlist
 info change-playlist remove-playlist show-playlist
 clear edit-album-metadata edit-metadata remove shuffle search
-repeat-track repeat-off shutdown seek>
+repeat-track repeat-off shutdown seek add>
 
 
 def current_pl
@@ -381,6 +399,49 @@ while true do
         if not pos.nil?
             puts "moving to positon #{pos}"
             play_new_track($xc, pos)
+        end
+        break
+    when "add"
+        d = Dir.new($MUSIC_DIRECTORY)
+        add_dir = $COMMAND_SIG + 'add-dir'
+        while !d.nil?
+            entries = d.entries.map do |x|
+                if Dir.exist?(File.join(d, x))
+                    x + '/'
+                else
+                    x
+                end
+            end
+            choice = my_dmenu(entries.sort << add_dir, "Add entries", d.entries.length)
+            path = File.join(d, choice)
+            if choice.empty?
+                d = nil
+            elsif choice == add_dir
+                begin
+                    current_pl.radd("file://" + d.path).wait
+                ensure
+                    d = nil
+                end
+            else
+                if Dir.exists?(path)
+                    if choice != '.'
+                        d = Dir.new(path)
+                    end
+                elsif File.exists?(path)
+                    begin
+                        $stderr.puts "Adding " + path
+                        current_pl.add_entry("file://"+path).wait
+                    ensure
+                        d = nil
+                    end
+                else
+                    begin
+                        $stderr.puts "Got a result we couldn't handle: "+choice.to_s
+                    ensure
+                        d = nil
+                    end
+                end
+            end
         end
         break
     when "info"
@@ -474,9 +535,18 @@ while true do
             field_sym = field.to_sym
             options = Set.new(get_collection_info(current_collection, field).map{|x| x.fetch(field_sym, "UNDEF")}).to_a.sort
 
-            prompt = "Search string"
+            lists = [options]
+            search_string = ""
             # XXX: Save and display past searches
-            search_string = my_dmenu(options, prompt)
+            begin
+                lists.each_with_index do |x, i|
+                    search_string = my_dmenu(x, prompt="Search string (#{i}/#{lists.length})", [x.length, 20].min)
+                    break
+                end
+            rescue Exception => exc
+                lists = lists.inject(Array.new){ |g, x| g + [x[0..(x.length/2 - 1)], x[x.length/2..-1]]}
+                retry
+            end
 
             if !options.include?(search_string)
                 search_string.gsub!(" ","*")

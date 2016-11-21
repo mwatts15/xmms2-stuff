@@ -831,7 +831,6 @@ pid = fork {
     UNIX_io.new.run
     File.new($FILE_LOCK, "w").flock( File::LOCK_UN | File::LOCK_EX )
 }
-Process.detach(pid)
 
 END {
     print $SOCKET_PATH

@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
+require 'dmenu'
 require 'xmms2_utils'
-require 'dmenu_util'
 require 'stringio'
 require 'uri'
 require 'socket'
@@ -37,7 +37,8 @@ if $GLIB
     $MUSIC_DIRECTORY = ENV.fetch('DXMMS2_MUSIC_DIRECTORY', fallback)
 end
 
-$FONT=ENV.fetch('DMENU_FONT', 'Noto Sans Mono CJK JP Regular:pixelsize=10')
+$FONT = ENV.fetch('DMENU_FONT', 'Noto Sans Mono CJK JP Regular')
+$FONT = $FONT + ':pixelsize=' + $FONT_WIDTH.to_s
 $LIST_ENTRIES_PER_PAGE = 15
 $LINE_HEIGHT=10
 # }}}
@@ -63,46 +64,9 @@ def time_string_to_ms(str)
     return res.to_i
 end
 
-class String
-    def initialize
-        super
-        force_encoding("utf-8")
-    end
-    def alignr(r, w)
-        str = self + r.rjust(Rational(w, $FONT_WIDTH*2) - r.kanji_off - self.kanji_off - self.length + Integer(w / $FONT_WIDTH*2) - 2, '.')
-        #puts str
-        str
-    end
-    def kanji_off
-        # Gives me the number of spaces "missing" with double-width
-        # kanji characters. Used for formatting adjustment
-        (self.bytes.count - self.length) / 2
-    end
-    def to_perc
-        if self.ends_width("%")
-            self.to_f / 100.0
-        else
-            self.to_f * 100
-        end
-    end
-    def scrunch(size,dots='...')
-        #self.force_encoding("utf-8")
-        #puts "Scrunching"
-        if self.length < size
-            #puts "Well, that was pointless"
-            self
-        else
-            sidelen = (size - dots.length - self.kanji_off) / 2
-            # Not centered; intentional
-            self[0..sidelen] + dots + self[-sidelen..-1]
-        end
-    end
-    alias :| alignr
-end
-
 def my_dmenu (entries, prompt='dxmms2', height=entries.count, width=$SCREEN_WIDTH)
     height = [height, 20].min
-    dmenu(entries, prompt, height, width,
+    Dmenu::dmenu(entries, prompt, height, width,
           $FG_COLOR,
           $BG_COLOR,
           $SEL_FG_COLOR,
@@ -363,11 +327,6 @@ def current_pl
     $xc.playlist
 end
 
-$xc.broadcast_playlist_loaded.notifier do |res|
-    current_pl = $xc.playlist
-    true
-end
-
 def play_new_track(xc, pos=false)
     if pos
         xc.playlist_set_next(pos).wait
@@ -543,7 +502,7 @@ while true do
                     search_string = my_dmenu(x, prompt="Search string (#{i}/#{lists.length})", [x.length, 20].min)
                     break
                 end
-            rescue Exception => exc
+            rescue Exception
                 lists = lists.inject(Array.new){ |g, x| g + [x[0..(x.length/2 - 1)], x[x.length/2..-1]]}
                 retry
             end
@@ -562,7 +521,7 @@ while true do
             coll = match_collection(field, search_string, current_collection)
             d = $xc.coll_query_ids(coll,"artist,album,tracknr").wait.value
             d = d.reverse
-            pos = list_ids(d, prompt="Results", start=0, nentries=$LIST_ENTRIES_PER_PAGE, commands=cs)
+            pos = list_ids(d, prompt="Results", 0, $LIST_ENTRIES_PER_PAGE, cs)
 
             # Make the playlist collection
             new_playlist('search-result-list', d)

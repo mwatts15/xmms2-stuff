@@ -64,7 +64,7 @@ def time_string_to_ms(str)
     return res.to_i
 end
 
-def my_dmenu (entries, prompt='dxmms2', height=entries.count, width=$SCREEN_WIDTH)
+def my_dmenu(entries, prompt='dxmms2', height=entries.count, width=$SCREEN_WIDTH)
     height = [height, 20].min
     Dmenu::dmenu(entries, prompt, height, width,
           $FG_COLOR,
@@ -356,7 +356,6 @@ while true do
     when "list"
         pos = pl_list(nil, nil, "Play Track:")
         if not pos.nil?
-            puts "moving to positon #{pos}"
             play_new_track($xc, pos)
         end
         break
@@ -517,7 +516,6 @@ while true do
                 break
             end
             search_string = "*#{search_string}*"
-            puts search_string
             coll = match_collection(field, search_string, current_collection)
             d = $xc.coll_query_ids(coll,"artist,album,tracknr").wait.value
             d = d.reverse
@@ -596,7 +594,7 @@ while true do
             while tag_menu(album_ids, [])
             end
         rescue => e
-            puts e
+            $stderr.puts e
         end
 
         break
@@ -656,7 +654,7 @@ while true do
         seek_location = my_dmenu(times.map{|x| x[0]}).to_s
         # FIXME: This math is clearly janky. Sadly I have actual work to do.
         seek = 20 * time_string_to_ms(seek_location)
-        puts $xc.playback_seek_ms(seek).wait.value
+        $xc.playback_seek_ms(seek).wait.value
         $stdout.flush
         break
     else

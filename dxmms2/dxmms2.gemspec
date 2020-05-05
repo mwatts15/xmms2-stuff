@@ -2,7 +2,7 @@
 
 Gem::Specification.new do |spec|
   spec.name          = "dxmms2"
-  spec.version       = "1.0.0"
+  spec.version       = "1.0.1"
   spec.authors       = ["Mark Watts"]
   spec.email         = ["wattsmark2015@gmail.com"]
   spec.summary       = %q{A client for working with xmms2}
@@ -19,5 +19,5 @@ Gem::Specification.new do |spec|
   spec.add_development_dependency "rake", ">= 12.3.2"
   spec.add_runtime_dependency "glib2", "~> 3.1.0"
   spec.add_runtime_dependency "xmms2_utils", "~> 0.1.2"
-  spec.add_runtime_dependency "markw-dmenu", "~> 1.0.0"
+  spec.add_runtime_dependency "markw-dmenu", "~> 1.2.1"
 end

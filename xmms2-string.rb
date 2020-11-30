@@ -10,7 +10,7 @@ $LOG_FILE = nil
 $DISCONNECTED = false
 $ACTIVE_COLOR = "#8aadb9"
 $STOPPED_COLOR  = "#ff0000"
-$xc = Xmms::client("xmms2-stirg")
+$xc = Xmms::client("xmms2-string")
 $LOG_FILE = File.open($LOG_PATH,"w")
 $xc.on_disconnect do
     $LOG_FILE.print "Server died. Getting the hell out of Dodge.\n"

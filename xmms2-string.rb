@@ -84,7 +84,7 @@ end
 if not(File.exists?($PIPE_PATH) and File.pipe?($PIPE_PATH))
     begin
         File.unlink($PIPE_PATH)
-    rescue => e
+    rescue
     end
     `mkfifo #{$PIPE_PATH}`
 end
@@ -105,7 +105,7 @@ def get_xmobar_string(tiddle, playtime, track_info_string)
                            elsif $paused
                                "*"
                            else
-                               "<fc=#{$ACTIVE_COLOR}>"+play_anim[play_anim_count] +"</fc>"
+                               "<fc=#{$ACTIVE_COLOR}>" + (play_anim[play_anim_count]) +"</fc>"
                            end
             repeat_symbol = if $repeat == "track"
                                 "T"
@@ -121,7 +121,6 @@ def get_xmobar_string(tiddle, playtime, track_info_string)
 end
 
 def update
-    $stdout.puts "XMMS2"
     begin
         p = $xc.playback_playtime.wait.value
     rescue TypeError => e
@@ -135,10 +134,16 @@ def update
         $stdout.puts get_xmobar_string($tiddle, p, $string)
         $stdout.flush
     rescue Xmms::Client::ClientError => e
+        $stdout.puts "XMMS2"
+        $stdout.flush
         $LOG_FILE.puts "Server died.\n"
     rescue Errno::EPIPE => e
+        $stdout.puts "XMMS2"
+        $stdout.flush
         $LOG_FILE.puts "Broken pipe (#{e.inspect}): \n"
     rescue => e
+        $stdout.puts "XMMS2"
+        $stdout.flush
         $LOG_FILE.print "Some error (#{e.inspect}): \n"
         $LOG_FILE.puts e.backtrace
         raise e

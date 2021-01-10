@@ -138,8 +138,6 @@ def update
         $stdout.flush
         $LOG_FILE.puts "Server died.\n"
     rescue Errno::EPIPE => e
-        $stdout.puts "XMMS2"
-        $stdout.flush
         $LOG_FILE.puts "Broken pipe (#{e.inspect}): \n"
     rescue => e
         $stdout.puts "XMMS2"

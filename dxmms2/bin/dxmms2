@@ -25,7 +25,7 @@ $COMMAND_SIG = "@"
 $SCREEN_WIDTH=Integer(ENV.fetch('DXMMS2_MENU_WIDTH', 600))
 $FONT_WIDTH=Integer(ENV.fetch('DXMMS2_FONT_WIDTH', 13)) #in pixels)
 $BG_COLOR=ENV.fetch('DMENU_BG_COLOR', '#000000')
-$FG_COLOR=ENV.fetch('DMENU_FG_COLOR', '#dc322f')
+$FG_COLOR=ENV.fetch('DMENU_FG_COLOR', '#268bd2')
 $SEL_BG_COLOR=ENV.fetch('DMENU_SEL_BG_COLOR', $FG_COLOR)
 $SEL_FG_COLOR=ENV.fetch('DMENU_SEL_FG_COLOR', $BG_COLOR)
 if $GLIB
@@ -37,7 +37,7 @@ if $GLIB
     $MUSIC_DIRECTORY = ENV.fetch('DXMMS2_MUSIC_DIRECTORY', fallback)
 end
 
-$FONT = ENV.fetch('DMENU_FONT', 'Noto Sans Mono CJK JP Regular')
+$FONT = ENV.fetch('DMENU_FONT', 'Noto Sans Mono CJK JP Bold')
 $FONT = $FONT + ':pixelsize=' + $FONT_WIDTH.to_s
 $LIST_ENTRIES_PER_PAGE = 15
 $LINE_HEIGHT=10
@@ -189,7 +189,11 @@ def xmms2_ids_to_display_list_strings(ids, fields=%w[artist title url duration])
     ids.map do |id|
         my_info = $xc.extract_medialib_info(id, *fields)
         artist_part = my_info[:artist]
-        some_title = (my_info[:title] or File.basename(my_info[:url]))
+        begin
+          some_title = (my_info[:title] or File.basename(my_info[:url]))
+        rescue Exception
+          some_title = "!!NO TITLE!!"
+        end
         duration = my_info[:duration].to_i.ms_to_time_string
         "#{artist_part}|||#{some_title} [#{duration}]"
     end

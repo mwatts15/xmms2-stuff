@@ -15,7 +15,7 @@ Gem::Specification.new do |spec|
   spec.test_files    = spec.files.grep(%r{^(test|spec|features)/})
   spec.require_paths = ["."]
 
-  spec.add_development_dependency "bundler", "~> 1.7"
+  spec.add_development_dependency "bundler", ">= 2.2.10"
   spec.add_development_dependency "rake", ">= 12.3.2"
   spec.add_runtime_dependency "glib2", "~> 3.4.3"
   spec.add_runtime_dependency "xmms2_utils", "~> 0.1.2"

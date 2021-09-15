@@ -2,7 +2,7 @@
 
 Gem::Specification.new do |spec|
   spec.name          = "dxmms2"
-  spec.version       = "1.0.4"
+  spec.version       = "1.0.5"
   spec.authors       = ["Mark Watts"]
   spec.email         = ["wattsmark2015@gmail.com"]
   spec.summary       = %q{A client for working with xmms2}

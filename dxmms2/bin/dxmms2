@@ -48,9 +48,10 @@ $LINE_HEIGHT=10
 #fi
 class Integer
     def ms_to_time_string
-        minutes=(self / 60000)
-        seconds=(self % 60000) / 1000
-        "%d:%02d" % [minutes, seconds]
+        sgn = self >= 0 ? '' : '-'
+        minutes=(self.abs / 60000)
+        seconds=(self.abs % 60000) / 1000
+        "%s%d:%02d" % [sgn, minutes, seconds]
     end
 end
 
@@ -58,10 +59,10 @@ def time_string_to_ms(str)
     res = 0
     s = 1
     for n in str.split(":").reverse do
-        s = 60 * s
         res = res + s * (n.to_i)
+        s = 60 * s
     end
-    return res.to_i
+    return res.to_i * 1000
 end
 
 def my_dmenu(entries, prompt='dxmms2', height=entries.count, width=$SCREEN_WIDTH)
@@ -644,7 +645,7 @@ while true do
         $xc.quit.wait
         break
     when "seek"
-        print $xc.playback_playtime.wait.value
+        cur = $xc.playback_playtime.wait.value
         id = $xc.playback_current_id.wait.value
         info = $xc.extract_medialib_info(id, :duration)
         dur = info[:duration].to_i
@@ -652,12 +653,16 @@ while true do
         times = []
         times << ["start",  0]
         Range.new(0,dur).step(interval_size).each do |x|
-            times << [x.ms_to_time_string, x]
+          times << ["#{x.ms_to_time_string} #{x-cur >= 0?"+":""}#{(x - cur).ms_to_time_string}", x]
         end
         times << ["end", dur]
         seek_location = my_dmenu(times.map{|x| x[0]}).to_s
-        # FIXME: This math is clearly janky. Sadly I have actual work to do.
-        seek = 20 * time_string_to_ms(seek_location)
+        if seek_location.empty?
+          break
+        end
+        thash = Hash[times]
+        seek = thash[seek_location]
+        #seek = time_string_to_ms(seek_location)
         $xc.playback_seek_ms(seek).wait.value
         $stdout.flush
         break

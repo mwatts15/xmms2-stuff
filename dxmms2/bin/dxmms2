@@ -362,8 +362,8 @@ while true do
         pos = pl_list(nil, nil, "Play Track:")
         if not pos.nil?
             play_new_track($xc, pos)
+            break
         end
-        break
     when "add"
         d = Dir.new($MUSIC_DIRECTORY)
         add_dir = $COMMAND_SIG + 'add-dir'
@@ -653,19 +653,20 @@ while true do
         times = []
         times << ["start",  0]
         Range.new(0,dur).step(interval_size).each do |x|
-          times << ["#{x.ms_to_time_string} #{x-cur >= 0?"+":""}#{(x - cur).ms_to_time_string}", x]
+          sgn = x-cur >= 0?"+":""
+          offset = (x - cur).ms_to_time_string
+          times << ["  #{x.ms_to_time_string}   #{sgn}#{offset} ", x]
         end
         times << ["end", dur]
         seek_location = my_dmenu(times.map{|x| x[0]}).to_s
-        if seek_location.empty?
+        if !seek_location.empty?
+          thash = Hash[times]
+          seek = thash[seek_location]
+          if !seek.nil?
+            $xc.playback_seek_ms(seek).wait.value
+          end
           break
         end
-        thash = Hash[times]
-        seek = thash[seek_location]
-        #seek = time_string_to_ms(seek_location)
-        $xc.playback_seek_ms(seek).wait.value
-        $stdout.flush
-        break
     else
         if not command.empty?
             `xmms2 #{command}`

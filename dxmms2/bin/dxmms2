@@ -20,7 +20,7 @@ end
 
 $xc = Xmms::client("dxmms2")
 
-$COMMAND_SIG = "@"
+$COMMAND_SIG = ","
 # default configs {{{
 $SCREEN_WIDTH=Integer(ENV.fetch('DXMMS2_MENU_WIDTH', 600))
 $FONT_WIDTH=Integer(ENV.fetch('DXMMS2_FONT_WIDTH', 13)) #in pixels)
@@ -303,7 +303,9 @@ def match_collection(field, pattern, base_coll=nil)
         coll.operands << Xmms::Collection.universe
     end
     coll.attributes["field"] = field
-    coll.attributes["value"] = pattern
+    if !pattern.nil?
+        coll.attributes["value"] = pattern
+    end
     coll
 end
 
@@ -481,26 +483,40 @@ while true do
             edit_metadata(ids.map{ |id| $xc.extract_medialib_info(id, "url")[:url] })
         end
 
-        current_collection = Xmms::Collection.universe # TODO: Support searching multiple fields as in xmmsfs
         refine = false
+        completed = false
         cs = {
-            'add' => proc { |k| add(k) },
-            'edit-metadata' => proc { |k| edit_ids_metadata(k) },
-            'new-playlist' => proc { |k| new_playlist_prompt(k) },
+            'add' => proc { |k| add(k) ; completed = true },
+            'edit-metadata' => proc { |k| edit_ids_metadata(k) ; completed = true},
+            'new-playlist' => proc { |k| new_playlist_prompt(k) ; completed = true},
             'refine' => proc { |k| refine=true }
         }
 
+        collection_stack = []
+        search_stack = []
         while true
-            field = my_dmenu(fields, prompt="Field")
+            search_path = search_stack.map{|x| "#{x[0]}:#{x[1]}"}.join("/")
+            if not search_path.empty?
+                search_path += "  "
+            end
+            field = my_dmenu(fields, prompt="#{search_path}Field")
             if field.empty?
-                break
+                if collection_stack.empty?
+                    break
+                else
+                    collection_stack.pop
+                    search_stack.pop
+                    next
+                end
+            end
+            current_collection = collection_stack[-1]
+            if current_collection.nil?
+                current_collection = Xmms::Collection.universe
             end
             field_sym = field.to_sym
             options = Set.new(get_collection_info(current_collection, field).map{|x| x.fetch(field_sym, "UNDEF")}).to_a.sort
-
             lists = [options]
             search_string = ""
-            # XXX: Save and display past searches
             begin
                 lists.each_with_index do |x, i|
                     search_string = my_dmenu(x, prompt="Search string (#{i}/#{lists.length})", [x.length, 20].min)
@@ -514,16 +530,16 @@ while true do
             if !options.include?(search_string)
                 search_string.gsub!(" ","*")
             elsif field == 'url'
-                search_string = Xmms::encode_url(search_string)
+                search_string = Xmms::encode_xmms2_url(search_string)
             end
 
             if search_string.empty?
-                break
+                next
             end
-            search_string = "*#{search_string}*"
-            coll = match_collection(field, search_string, current_collection)
+            coll = match_collection(field, search_string == "UNDEF" ? nil : "*#{search_string}*", current_collection)
             d = $xc.coll_query_ids(coll,"artist,album,tracknr").wait.value
             d = d.reverse
+            refine = false
             pos = list_ids(d, prompt="Results", 0, $LIST_ENTRIES_PER_PAGE, cs)
 
             # Make the playlist collection
@@ -534,17 +550,21 @@ while true do
                 pl = $xc.playlist('search-result-list')
                 pl.load.wait
                 play_new_track($xc, pos)
+                completed = true
                 break
             end
 
             if refine
-                current_collection = coll
-            else
-                current_collection = Xmms::Collection.universe
+                collection_stack.push coll
+                search_stack.push [field, search_string]
+            elsif completed
+                break
             end
         end
 
-        break
+        if completed
+          break
+        end
     when "remove"
         while true
             pos = pl_list(nil,nil,"Remove entry:")

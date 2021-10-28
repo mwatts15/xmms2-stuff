@@ -18,6 +18,9 @@ end
 # for dmenu              #
 ##########################
 
+# XXX: I ruby doesn't designate keyword arguments with =, it just helps me
+# remember what some arguments are
+
 $xc = Xmms::client("dxmms2")
 
 $COMMAND_SIG = ","
@@ -65,8 +68,10 @@ def time_string_to_ms(str)
     return res.to_i * 1000
 end
 
-def my_dmenu(entries, prompt='dxmms2', height=entries.count, width=$SCREEN_WIDTH)
-    height = [height, 20].min
+def my_dmenu(entries, prompt='dxmms2', height=nil, width=$SCREEN_WIDTH)
+    if height.nil?
+        height = [entries.length, 20].min
+    end
     Dmenu::dmenu(entries, prompt, height, width,
           $FG_COLOR,
           $BG_COLOR,
@@ -101,8 +106,8 @@ def list_ids(entries, prompt, start=0, nentries=nil, commands=nil)
     # XXX: Create a list object to pass to user-supplied commands
     #      list object allows for setting list start, page size, list content,
     #      whether to redisplay the list, and maybe other things
-    morestring,endstring,startstring,backstring =
-        %w[more end start back].map{|w| $COMMAND_SIG + w}
+    morestring,endstring,startstring,backstring,allstring,pagedstring =
+        %w[more end start back all paged].map{|w| $COMMAND_SIG + w}
     if commands.nil?
         commands = Hash.new
     end
@@ -112,9 +117,10 @@ def list_ids(entries, prompt, start=0, nentries=nil, commands=nil)
         c1[$COMMAND_SIG + k] = v
     end
     listing=1
-    nentries = (nentries.nil? ? $LIST_ENTRIES_PER_PAGE : nentries)
+    nentries = nentries_orig = (nentries.nil? ? $LIST_ENTRIES_PER_PAGE : nentries)
     pos = nil
     list_start = start
+    paged = true
     while ( listing == 1 ) do
         start_clamped = false
         end_clamped = false
@@ -126,7 +132,7 @@ def list_ids(entries, prompt, start=0, nentries=nil, commands=nil)
         list_end = list_start + nentries
 
         #clamps end
-        (list_end > entries.length) and (list_end = entries.length ; end_clamped = true)
+        (list_end >= entries.length) and (list_end = entries.length ; end_clamped = true)
 
 
         nw = list_end.to_s.length
@@ -148,11 +154,20 @@ def list_ids(entries, prompt, start=0, nentries=nil, commands=nil)
             items << morestring
         end
 
+        if nentries < entries.length or list_start != 0
+            items << allstring
+        end
+
+        if nentries == entries.length
+            items << pagedstring
+        end
+
         c1.keys.each do |d|
             items << d
         end
 
-        choice = my_dmenu(items, prompt, items.length).gsub(/^\s+|\s+$/, "")
+        list_len = paged ? items.length : 20
+        choice = my_dmenu(items, prompt, list_len).gsub(/^\s+|\s+$/, "")
         pos = choice[/^-?\d+|#{$COMMAND_SIG}[a-zA-Z0-9\-_.]+/]
 
         case pos
@@ -164,6 +179,14 @@ def list_ids(entries, prompt, start=0, nentries=nil, commands=nil)
             list_start = entries.length - nentries
         when startstring
             list_start = 0
+        when allstring
+            list_start = 0
+            nentries = entries.length
+            paged = false
+        when pagedstring
+            list_start = start
+            nentries = nentries_orig
+            paged = true
         when *(c1.keys)
             f = c1[pos]
             f.call(entries)
@@ -377,7 +400,7 @@ while true do
                     x
                 end
             end
-            choice = my_dmenu(entries.sort << add_dir, "Add entries", d.entries.length)
+            choice = my_dmenu(entries.sort << add_dir, "Add entries")
             path = File.join(d, choice)
             if choice.empty?
                 d = nil
@@ -432,7 +455,7 @@ while true do
                 [k,v]
             }]
             while true
-                field = my_dmenu(info.map {|k,v| "#{k} |||#{v[0]}"}, "Info", info.size)
+                field = my_dmenu(info.map {|k,v| "#{k} |||#{v[0]}"}, "Info")
                 if field.empty?
                     break
                 else
@@ -499,7 +522,7 @@ while true do
             if not search_path.empty?
                 search_path += "  "
             end
-            field = my_dmenu(fields, prompt="#{search_path}Field")
+            field = my_dmenu(fields, "#{search_path}Field")
             if field.empty?
                 if collection_stack.empty?
                     break
@@ -519,7 +542,7 @@ while true do
             search_string = ""
             begin
                 lists.each_with_index do |x, i|
-                    search_string = my_dmenu(x, prompt="Search string (#{i}/#{lists.length})", [x.length, 20].min)
+                    search_string = my_dmenu(x, "Search string (#{i}/#{lists.length})")
                     break
                 end
             rescue Exception
@@ -540,7 +563,7 @@ while true do
             d = $xc.coll_query_ids(coll,"artist,album,tracknr").wait.value
             d = d.reverse
             refine = false
-            pos = list_ids(d, prompt="Results", 0, $LIST_ENTRIES_PER_PAGE, cs)
+            pos = list_ids(d, "Results", 0, $LIST_ENTRIES_PER_PAGE, cs)
 
             # Make the playlist collection
             new_playlist('search-result-list', d)

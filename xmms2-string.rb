@@ -23,15 +23,31 @@ $repeat = "off"
 $stopped = false
 $tiddle = 0
 
-$fields = [:title, :artist, :album]
+$fields = [:title, :artist, [:album, :channel]]
 
 $info = nil
 $string = ""
 
-def get_string(sep="::",undef_string="UNDEF")
+def get_string(sep="::",undef_string="-")
     $current_id = $xc.playback_current_id.wait.value
-    $info = $xc.extract_medialib_info($current_id, *$fields, :duration)
-    info = $fields.map{|f| if $info[f] == nil then undef_string else $info[f] end}
+    $info = $xc.extract_medialib_info($current_id, *($fields.flatten), :duration)
+    info = $fields.map do |f|
+        if f.kind_of?(Array)
+            val = f.map{|sym| $info[sym]}.find{|x| !x.nil?}
+        else
+            val = $info[f]
+        end
+        if val == nil
+            undef_string
+        else
+            val
+        end
+    end
+
+    # Decrease the max width of each individual field value until we're below
+    # our "magic" total max string width (70 characters is just what fits on my
+    # xmobar comfortably). This prevents clipping just the right-most fields
+    # when there happens to be an especially long title or album.
     max_width = info.map{|k| k.real_length}.max
     begin
         string = info.map{|i| "#{i[0,max_width]}" }.join(sep) << "\n"
@@ -98,24 +114,27 @@ def get_xmobar_string(tiddle, playtime, track_info_string)
         if d > 0
             r = [track_info_string.length - 1, (playtime * track_info_string.length) / d].min
             r = [0, r].max
-            play_anim = "-\\|/"
-            play_anim_count = tiddle % play_anim.length
-            start_symbol = if $stopped
-                               "<fc=#{$STOPPED_COLOR}>*</fc>"
-                           elsif $paused
-                               "*"
-                           else
-                               "<fc=#{$ACTIVE_COLOR}>" + (play_anim[play_anim_count]) +"</fc>"
-                           end
-            repeat_symbol = if $repeat == "track"
-                                "T"
-                            elsif $repeat == "playlist"
-                                "P"
-                            else
-                                "-"
-                            end
-            str = start_symbol + repeat_symbol + " " + String.new(track_info_string).insert(r, "</fc>").insert(0,"<fc=#{$ACTIVE_COLOR}>")
+        else
+            r = -2
         end
+        play_anim = "-\\|/"
+        play_anim_count = tiddle % play_anim.length
+        start_symbol = if $stopped
+                           "<fc=#{$STOPPED_COLOR}>*</fc>"
+                       elsif $paused
+                           "*"
+                       else
+                           "<fc=#{$ACTIVE_COLOR}>" + (play_anim[play_anim_count]) +"</fc>"
+                       end
+        repeat_symbol = if $repeat == "track"
+                            "T"
+                        elsif $repeat == "playlist"
+                            "P"
+                        else
+                            "-"
+                        end
+        formatted_info_str = String.new(track_info_string).insert(r, "</fc>").insert(0,"<fc=#{$ACTIVE_COLOR}>")
+        str = start_symbol + repeat_symbol + " " + formatted_info_str
     end
     str
 end

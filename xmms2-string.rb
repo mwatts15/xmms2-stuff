@@ -15,7 +15,6 @@ $LOG_FILE = File.open($LOG_PATH,"w")
 $xc.on_disconnect do
     $LOG_FILE.print "Server died. Getting the hell out of Dodge.\n"
     exit
-    #$DISCONNECTED = true
 end
 
 $paused = false
@@ -83,6 +82,13 @@ end
 
 $xc.broadcast_playback_current_id.notifier do |res|
     $string = get_string
+    true
+end
+
+$xc.broadcast_medialib_entry_changed.notifier do |res|
+    if $current_id == res
+        $string = get_string
+    end
     true
 end
 
